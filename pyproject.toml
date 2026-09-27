@@ -1,0 +1,12 @@
+[project]
+name = "my-business-be"
+version = "0.1.0"
+description = "FastAPI backend for my-business-fe"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 110

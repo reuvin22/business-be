@@ -1,0 +1,10 @@
+# Web framework + server (uvicorn), and the `fastapi dev` command
+fastapi[standard]==0.141.1
+# Reads settings from .env
+pydantic-settings==2.15.0
+# Checks Firebase login tokens
+firebase-admin==7.7.0
+
+# Testing
+pytest==9.1.1
+httpx==0.28.1

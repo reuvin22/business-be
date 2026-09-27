@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+
+# Local settings and secrets (never commit)
+.env
+firebase-service-account.json
+*-firebase-adminsdk-*.json
+
+# Firebase emulator logs
+firebase-debug.log
+firestore-debug.log
+
+# Editors
+.vscode/*
+.idea/
+.DS_Store
