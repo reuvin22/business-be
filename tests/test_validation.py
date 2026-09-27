@@ -15,21 +15,21 @@ def test_health_check_does_not_need_login():
 
 
 def test_routes_need_login():
-    assert TestClient(app).get("/api/businesses").status_code == 401
+    assert TestClient(app).get("/api/v1/businesses").status_code == 401
 
 
 def test_me_returns_the_logged_in_user(client_without_db):
-    assert client_without_db.get("/api/me").json()["uid"] == "owner-uid"
+    assert client_without_db.get("/api/v1/me").json()["uid"] == "owner-uid"
 
 
 def test_business_needs_a_name_and_a_type(client_without_db):
-    response = client_without_db.post("/api/businesses", json={"businessName": "No type", "businessTypes": []})
+    response = client_without_db.post("/api/v1/businesses", json={"businessName": "No type", "businessTypes": []})
     assert response.status_code == 422
 
 
 def test_links_must_be_urls(client_without_db):
     response = client_without_db.post(
-        "/api/businesses", json={"businessName": "Acme", "businessTypes": ["SUPPLIER"], "website": "acme.com"}
+        "/api/v1/businesses", json={"businessName": "Acme", "businessTypes": ["SUPPLIER"], "website": "acme.com"}
     )
     assert response.status_code == 422
     assert "http" in response.text

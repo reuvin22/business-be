@@ -32,13 +32,13 @@ fastapi dev app/main.py
 ```
 
 - API: http://localhost:8000 · interactive docs: http://localhost:8000/docs
-- The frontend expects the API at `http://localhost:8000/api` (change with `VITE_API_URL`).
+- All routes are versioned under `/api/v1` (only `/api/health` is not). The frontend reads the base URL from `VITE_API_URL`, e.g. `http://localhost:8000/api/v1`.
 
 ## Folder structure (MVC)
 
 ```
 app/
-├── main.py                 # Creates the app, adds CORS, registers every router under /api
+├── main.py                 # Creates the app, adds CORS, registers every router under /api/v1
 ├── core/                   # Setup used everywhere
 │   ├── config.py           #   Settings from .env
 │   ├── firebase.py         #   get_db() (Firestore), verify_token(), find_user_by_email()
@@ -158,7 +158,7 @@ The `Dockerfile` builds a small production image (no tests, no secrets). Render 
    | `ADMIN_EMAILS` | your email |
 
 5. **Health Check Path**: `/api/health`.
-6. In the frontend, set `VITE_API_URL=https://<your-api>.onrender.com/api` and rebuild it.
+6. In the frontend, set `VITE_API_URL=https://<your-api>.onrender.com/api/v1` and rebuild it.
 
 Test the image locally (with Docker Desktop running):
 

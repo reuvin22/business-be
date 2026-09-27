@@ -69,7 +69,7 @@ def client_without_db():
 
 def create_business(client, name="Acme Supplies", types=("SUPPLIER",), **extra) -> dict:
     response = client.post(
-        "/api/businesses", json={"businessName": name, "businessTypes": list(types), "currency": "PHP", **extra}
+        "/api/v1/businesses", json={"businessName": name, "businessTypes": list(types), "currency": "PHP", **extra}
     )
     assert response.status_code == 201, response.text
     return response.json()
@@ -78,21 +78,21 @@ def create_business(client, name="Acme Supplies", types=("SUPPLIER",), **extra) 
 def create_product_with_stock(client, business_id: str, stock: float = 100) -> tuple[str, str]:
     """A public product with price tiers, a warehouse, and stock there. Returns (product_id, location_id)."""
     product = client.post(
-        f"/api/businesses/{business_id}/products",
+        f"/api/v1/businesses/{business_id}/products",
         json={"productName": "Cola 1.5L", "unit": "box", "orderRules": {"minimumOrderQuantity": 10, "orderMultiple": 5}},
     ).json()
     for tier in ({"minimumQuantity": 1, "maximumQuantity": 49, "price": 120}, {"minimumQuantity": 50, "price": 100}):
-        response = client.post(f"/api/businesses/{business_id}/products/{product['id']}/prices", json=tier)
+        response = client.post(f"/api/v1/businesses/{business_id}/products/{product['id']}/prices", json=tier)
         assert response.status_code == 201, response.text
 
     location = client.post(
-        f"/api/businesses/{business_id}/locations",
+        f"/api/v1/businesses/{business_id}/locations",
         json={"locationName": "Main warehouse", "locationType": "WAREHOUSE", "city": "Pasig"},
     ).json()
     response = client.post(
-        f"/api/businesses/{business_id}/inventory",
+        f"/api/v1/businesses/{business_id}/inventory",
         json={"productId": product["id"], "locationId": location["id"], "quantity": stock, "reorderLevel": 20},
     )
     assert response.status_code == 201, response.text
-    client.put(f"/api/businesses/{business_id}/delivery", json={"pickupAvailable": True})
+    client.put(f"/api/v1/businesses/{business_id}/delivery", json={"pickupAvailable": True})
     return product["id"], location["id"]
