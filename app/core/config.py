@@ -25,6 +25,19 @@ class Settings(BaseSettings):
     # Cached data expires after this many seconds, even if nothing changed (a safety net).
     cache_ttl_seconds: int = 600
 
+    # Cloudflare R2 (file storage for uploaded images). Find these in the Cloudflare dashboard:
+    #   R2 > your bucket > Settings (public URL), and R2 > Manage API tokens (keys).
+    r2_account_id: str = ""
+    r2_access_key_id: str = ""
+    r2_secret_access_key: str = ""
+    r2_bucket: str = ""
+    # The bucket's public address, e.g. https://pub-xxxx.r2.dev or https://images.yourdomain.com
+    r2_public_url: str = ""
+
+    @property
+    def r2_configured(self) -> bool:
+        return all([self.r2_account_id, self.r2_access_key_id, self.r2_secret_access_key, self.r2_bucket, self.r2_public_url])
+
     model_config = SettingsConfigDict(env_file=".env")
 
     @property

@@ -6,3 +6,5 @@ pydantic-settings==2.15.0
 firebase-admin==7.7.0
 # Cache in front of Firestore
 redis==6.4.0
+# Uploads images to Cloudflare R2 (R2 speaks the Amazon S3 API)
+boto3==1.43.103

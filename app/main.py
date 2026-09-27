@@ -17,6 +17,7 @@ from app.routes import (
     network_routes,
     order_routes,
     profile_routes,
+    upload_routes,
 )
 
 # Every route is versioned: /api/v1/... When a breaking change is needed, add /api/v2
@@ -79,6 +80,7 @@ for router_module in (
     commerce_routes,
     order_routes,
     network_routes,
+    upload_routes,
     admin_routes,
 ):
     app.include_router(router_module.router, prefix=API_V1_PREFIX)

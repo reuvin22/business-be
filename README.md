@@ -169,6 +169,22 @@ Redis database in the **same region as Render** (Redis Cloud lets you choose it 
 from 30 seconds to several minutes. This is the biggest cause of slow first loads. Use a paid instance,
 or ping `/api/health` every 10 minutes (for example with a free uptime monitor like UptimeRobot).
 
+## Image uploads (Cloudflare R2)
+
+Product photos are uploaded to Cloudflare R2 (`POST /api/v1/businesses/{id}/images`, form field `file`).
+The API checks the file really is an image (JPG, PNG, WEBP, GIF; up to 5 MB), stores it under
+`businesses/{id}/images/`, and returns its public URL, which is saved on the product. Images are optional.
+The browser shrinks photos before uploading (max 1600 px, WEBP), so uploads and pages stay fast.
+
+Setup (once):
+1. Cloudflare dashboard, **R2 > Create bucket** (e.g. `my-business-images`).
+2. In the bucket, **Settings > Public access**: turn on the `r2.dev` URL (or connect your own domain). Copy it.
+3. **R2 > Manage API tokens > Create token** with *Object Read & Write* for that bucket. Copy the Access Key ID and Secret.
+4. Put these in `.env` (and in Render's Environment):
+   `R2_ACCOUNT_ID` (shown on the R2 overview page), `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`, `R2_PUBLIC_URL`.
+
+Until these are set, the upload button answers "Image uploads are not set up yet"; everything else works.
+
 ## Tests
 
 Tests never touch your real Firestore. They use the **Firestore emulator** (needs [Java 11+](https://adoptium.net/) and Node.js).
@@ -202,6 +218,7 @@ The `Dockerfile` builds a small production image (no tests, no secrets). Render 
    | `CORS_ORIGINS` | your frontend URLs, e.g. `http://localhost:5173,https://my-business.onrender.com` |
    | `ADMIN_EMAILS` | your email |
    | `REDIS_URL` | your Redis connection URL (turns the cache on) |
+   | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`, `R2_PUBLIC_URL` | Cloudflare R2, for image uploads |
 
 5. **Health Check Path**: `/api/health`. After deploying, open `/api/health/firebase`: it says `ok`, or exactly what is wrong with the key setup.
 6. In the frontend, set `VITE_API_URL=https://<your-api>.onrender.com/api/v1` and rebuild it.
