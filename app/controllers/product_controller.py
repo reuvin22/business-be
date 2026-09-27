@@ -18,6 +18,7 @@ from app.models.product import (
 from app.models.profile import brands_collection
 from app.schemas.enums import Permission
 from app.schemas.product import PriceIn, ProductIn, VariantIn
+from app.utils.parallel import run_parallel
 
 # ---- Products ----------------------------------------------------------------------------
 
@@ -70,6 +71,13 @@ def _delete_inventory_where(db: Client, business_id: str, field: str, value: str
 def list_variants(db: Client, business_id: str, product_id: str) -> list[Variant]:
     get_product(db, business_id, product_id)
     return crud.list_documents(variants_collection(db, business_id, product_id), Variant)
+
+
+def list_all_variants(db: Client, business_id: str) -> list[Variant]:
+    """Every variant of every product in one call (read at the same time, not product by product)."""
+    products = list_products(db, business_id)
+    variant_lists = run_parallel(*[lambda p=p: list_variants(db, business_id, p.id) for p in products])
+    return [variant for variants in variant_lists for variant in variants]
 
 
 def get_variant(db: Client, business_id: str, product_id: str, variant_id: str) -> Variant:

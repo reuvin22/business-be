@@ -7,6 +7,7 @@ Only claim what was actually checked: see VerificationType in app/schemas/enums.
 from google.cloud.firestore import Client, FieldFilter
 
 from app.controllers.crud import bad_request, not_found
+from app.core import cache
 from app.controllers.trust_controller import set_document_status
 from app.dependencies.business_access import BusinessAccess
 from app.models.business import Business, business_document, businesses_collection
@@ -20,9 +21,12 @@ from app.utils.helpers import current_time_ms
 
 
 def list_requests_for_business(db: Client, business_id: str) -> list[VerificationRequest]:
-    query = verification_requests_collection(db).where(filter=FieldFilter("businessId", "==", business_id))
-    requests = [VerificationRequest.from_snapshot(snapshot) for snapshot in query.stream()]
-    return sorted(requests, key=lambda r: r.submitted_at, reverse=True)
+    def read() -> list[VerificationRequest]:
+        query = verification_requests_collection(db).where(filter=FieldFilter("businessId", "==", business_id))
+        requests = [VerificationRequest.from_snapshot(snapshot) for snapshot in query.stream()]
+        return sorted(requests, key=lambda r: r.submitted_at, reverse=True)
+
+    return cache.cached_models(cache.business_scope(business_id), "verifications", VerificationRequest, read)
 
 
 def submit_request(db: Client, access: BusinessAccess, request_in: VerificationRequestIn) -> VerificationRequest:
@@ -52,6 +56,7 @@ def submit_request(db: Client, access: BusinessAccess, request_in: VerificationR
     # A business that is already verified keeps its badge while a higher level is reviewed
     if access.business.verification_status != VerificationStatus.VERIFIED:
         business_document(db, access.business_id).update({"verificationStatus": VerificationStatus.PENDING.value})
+    cache.bump(cache.business_scope(access.business_id), cache.ADMIN, cache.DIRECTORY)
     return request
 
 
@@ -59,10 +64,13 @@ def submit_request(db: Client, access: BusinessAccess, request_in: VerificationR
 
 
 def list_all_requests(db: Client, status: VerificationStatus | None = None) -> list[VerificationRequest]:
-    collection = verification_requests_collection(db)
-    query = collection.where(filter=FieldFilter("status", "==", status.value)) if status else collection
-    requests = [VerificationRequest.from_snapshot(snapshot) for snapshot in query.stream()]
-    return sorted(requests, key=lambda r: r.submitted_at, reverse=True)
+    def read() -> list[VerificationRequest]:
+        collection = verification_requests_collection(db)
+        query = collection.where(filter=FieldFilter("status", "==", status.value)) if status else collection
+        requests = [VerificationRequest.from_snapshot(snapshot) for snapshot in query.stream()]
+        return sorted(requests, key=lambda r: r.submitted_at, reverse=True)
+
+    return cache.cached_models(cache.ADMIN, f"verifications:{status or 'all'}", VerificationRequest, read)
 
 
 def review_request(db: Client, admin: CurrentUser, request_id: str, review_in: VerificationReviewIn) -> VerificationRequest:
@@ -102,9 +110,15 @@ def review_request(db: Client, admin: CurrentUser, request_id: str, review_in: V
     if request.verification_type == VerificationType.BUSINESS and review_in.status == VerificationStatus.VERIFIED:
         settings_document(db, request.business_id, "legal").set({"verificationStatus": "VERIFIED"}, merge=True)
 
+    cache.bump(cache.business_scope(request.business_id), cache.ADMIN, cache.DIRECTORY)
     return request
 
 
 def list_all_businesses(db: Client) -> list[Business]:
-    businesses = [Business.from_snapshot(snapshot) for snapshot in businesses_collection(db).stream()]
-    return sorted(businesses, key=lambda b: b.created_at, reverse=True)
+    """Every business (admins only). Cached with the directory, which changes whenever a business does."""
+
+    def read() -> list[Business]:
+        businesses = [Business.from_snapshot(snapshot) for snapshot in businesses_collection(db).stream()]
+        return sorted(businesses, key=lambda b: b.created_at, reverse=True)
+
+    return cache.cached_models(cache.DIRECTORY, "all-businesses", Business, read)

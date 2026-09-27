@@ -7,6 +7,7 @@ from google.cloud.firestore import Client, FieldFilter
 
 from app.controllers.business_controller import find_business
 from app.controllers.crud import bad_request, not_found
+from app.core import cache
 from app.dependencies.business_access import BusinessAccess
 from app.models.network import Relationship, relationships_collection
 from app.schemas.enums import Permission, RelationshipStatus, RelationshipType
@@ -43,9 +44,18 @@ def to_view(relationship: Relationship, my_business_id: str) -> RelationshipView
 
 
 def _all_for(db: Client, business_id: str) -> list[Relationship]:
-    query = relationships_collection(db).where(filter=FieldFilter("businessIds", "array_contains", business_id))
-    relationships = [Relationship.from_snapshot(snapshot) for snapshot in query.stream()]
-    return sorted(relationships, key=lambda r: r.created_at, reverse=True)
+    def read() -> list[Relationship]:
+        query = relationships_collection(db).where(filter=FieldFilter("businessIds", "array_contains", business_id))
+        relationships = [Relationship.from_snapshot(snapshot) for snapshot in query.stream()]
+        return sorted(relationships, key=lambda r: r.created_at, reverse=True)
+
+    return cache.cached_models(cache.business_scope(business_id), "relationships", Relationship, read)
+
+
+def _save(db: Client, relationship: Relationship) -> None:
+    """Saves the relationship and clears both businesses' cached lists."""
+    relationships_collection(db).document(relationship.id).set(relationship.to_firestore())
+    cache.bump(*[cache.business_scope(business_id) for business_id in relationship.business_ids])
 
 
 def list_relationships(db: Client, access: BusinessAccess) -> list[RelationshipView]:
@@ -82,7 +92,7 @@ def request_relationship(db: Client, access: BusinessAccess, relationship_in: Re
         created_at=now,
         updated_at=now,
     )
-    ref.set(relationship.to_firestore())
+    _save(db, relationship)
     return to_view(relationship, access.business_id)
 
 
@@ -101,7 +111,7 @@ def respond_to_relationship(
     relationship.status = RelationshipStatus.ACTIVE if respond_in.accept else RelationshipStatus.DECLINED
     relationship.started_at = now if respond_in.accept else None
     relationship.updated_at = now
-    relationships_collection(db).document(relationship_id).set(relationship.to_firestore())
+    _save(db, relationship)
     return to_view(relationship, access.business_id)
 
 
@@ -116,12 +126,12 @@ def end_relationship(db: Client, access: BusinessAccess, relationship_id: str) -
     relationship.status = RelationshipStatus.ENDED
     relationship.ended_at = now
     relationship.updated_at = now
-    relationships_collection(db).document(relationship_id).set(relationship.to_firestore())
+    _save(db, relationship)
     return to_view(relationship, access.business_id)
 
 
 def _get(db: Client, access: BusinessAccess, relationship_id: str) -> Relationship:
-    snapshot = relationships_collection(db).document(relationship_id).get()
+    snapshot = relationships_collection(db).document(relationship_id).get()  # fresh read: used before changes
     if not snapshot.exists:
         raise not_found("Relationship")
     relationship = Relationship.from_snapshot(snapshot)

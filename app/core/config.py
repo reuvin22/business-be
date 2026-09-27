@@ -19,6 +19,12 @@ class Settings(BaseSettings):
     # and manage the shared product categories.
     admin_emails: str = ""
 
+    # Redis cache, e.g. redis://default:password@host:port. Leave empty to run without a cache.
+    # Put the API server in the same region as Redis, or cache calls cross the ocean too.
+    redis_url: str = ""
+    # Cached data expires after this many seconds, even if nothing changed (a safety net).
+    cache_ttl_seconds: int = 600
+
     model_config = SettingsConfigDict(env_file=".env")
 
     @property

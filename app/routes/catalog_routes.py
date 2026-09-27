@@ -73,6 +73,12 @@ def delete_product(product_id: str, db: Client = Depends(get_db), access: Busine
 # ---- Variants -----------------------------------------------------------------------------
 
 
+@router.get("/variants", response_model=list[Variant])
+def list_all_variants(db: Client = Depends(get_db), access: BusinessAccess = Depends(get_business_access)):
+    """Every variant of every product, in one request (e.g. for stock and sales forms)."""
+    return product_controller.list_all_variants(db, access.business_id)
+
+
 @router.get("/products/{product_id}/variants", response_model=list[Variant])
 def list_variants(product_id: str, db: Client = Depends(get_db), access: BusinessAccess = Depends(get_business_access)):
     return product_controller.list_variants(db, access.business_id, product_id)

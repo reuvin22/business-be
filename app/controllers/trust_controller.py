@@ -3,6 +3,7 @@
 from google.cloud.firestore import Client
 
 from app.controllers import crud
+from app.core import cache
 from app.dependencies.business_access import BusinessAccess
 from app.models.profile import (
     BusinessDocument,
@@ -50,6 +51,7 @@ def set_certification_status(db: Client, business_id: str, cert_id: str, status:
     """Platform admins only (see admin routes)."""
     cert = crud.get_document(certifications_collection(db, business_id), cert_id, Certification, "Certification")
     certifications_collection(db, business_id).document(cert_id).update({"verificationStatus": status.value})
+    cache.bump(cache.business_scope(business_id))
     cert.verification_status = status
     return cert
 
@@ -114,3 +116,4 @@ def set_document_status(db: Client, business_id: str, document_id: str, status: 
     doc_ref = documents_collection(db, business_id).document(document_id)
     if doc_ref.get().exists:
         doc_ref.update({"verificationStatus": status.value, "verifiedAt": verified_at})
+        cache.bump(cache.business_scope(business_id))

@@ -3,12 +3,14 @@ from dataclasses import dataclass
 from fastapi import Depends, HTTPException, status
 from google.cloud.firestore import Client
 
+from app.core import cache
 from app.core.firebase import get_db
 from app.dependencies.auth import get_current_user
 from app.models.business import Business, business_document
 from app.models.member import Member, members_collection
 from app.schemas.enums import MemberRole, MemberStatus, Permission
 from app.schemas.user import CurrentUser
+from app.utils.parallel import run_parallel
 
 
 @dataclass
@@ -50,15 +52,32 @@ def get_business_access(
     """
     not_found = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Business not found")
 
-    business_snapshot = business_document(db, business_id).get()
-    if not business_snapshot.exists:
+    # This runs on every business request, so both reads are cached (and read in parallel on a miss)
+    business, member = run_parallel(
+        lambda: load_business(db, business_id),
+        lambda: cache.cached_model(
+            cache.business_scope(business_id),
+            f"member:{user.uid}",
+            Member,
+            lambda: _read_member(db, business_id, user.uid),
+        ),
+    )
+    if business is None or member is None or member.status != MemberStatus.ACTIVE:
         raise not_found
 
-    member_snapshot = members_collection(db, business_id).document(user.uid).get()
-    if not member_snapshot.exists:
-        raise not_found
-    member = Member.from_snapshot(member_snapshot)
-    if member.status != MemberStatus.ACTIVE:
-        raise not_found
+    return BusinessAccess(business=business, member=member, user=user)
 
-    return BusinessAccess(business=Business.from_snapshot(business_snapshot), member=member, user=user)
+
+def load_business(db: Client, business_id: str) -> Business | None:
+    """Any business by id (cached), or None."""
+
+    def read() -> Business | None:
+        snapshot = business_document(db, business_id).get()
+        return Business.from_snapshot(snapshot) if snapshot.exists else None
+
+    return cache.cached_model(cache.business_scope(business_id), "business", Business, read)
+
+
+def _read_member(db: Client, business_id: str, uid: str) -> Member | None:
+    snapshot = members_collection(db, business_id).document(uid).get()
+    return Member.from_snapshot(snapshot) if snapshot.exists else None

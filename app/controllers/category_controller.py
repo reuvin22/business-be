@@ -2,6 +2,7 @@ from google.cloud.firestore import Client
 
 from app.controllers import crud
 from app.controllers.crud import bad_request
+from app.core import cache
 from app.models.category import Category, categories_collection
 from app.schemas.category import CategoryIn
 from app.utils.helpers import current_time_ms
@@ -64,6 +65,7 @@ def load_default_categories(db: Client) -> list[Category]:
             )
             batch.set(child_ref, child.to_firestore())
     batch.commit()
+    cache.bump(cache.CATEGORIES)
     return list_categories(db)
 
 

@@ -5,6 +5,7 @@ from google.cloud.firestore import Client, FieldFilter
 from app.controllers import crud
 from app.controllers.business_controller import find_business
 from app.controllers.crud import bad_request, not_found
+from app.core import cache
 from app.dependencies.business_access import BusinessAccess
 from app.models.network import Conversation, Message, conversations_collection, messages_collection
 from app.schemas.enums import Permission
@@ -26,8 +27,11 @@ def to_view(conversation: Conversation, my_business_id: str) -> ConversationView
 
 
 def list_conversations(db: Client, access: BusinessAccess) -> list[ConversationView]:
-    query = conversations_collection(db).where(filter=FieldFilter("businessIds", "array_contains", access.business_id))
-    conversations = [Conversation.from_snapshot(snapshot) for snapshot in query.stream()]
+    def read() -> list[Conversation]:
+        query = conversations_collection(db).where(filter=FieldFilter("businessIds", "array_contains", access.business_id))
+        return [Conversation.from_snapshot(snapshot) for snapshot in query.stream()]
+
+    conversations = cache.cached_models(cache.business_scope(access.business_id), "conversations", Conversation, read)
     conversations.sort(key=lambda c: c.last_message_at, reverse=True)
     return [to_view(c, access.business_id) for c in conversations]
 
@@ -63,28 +67,32 @@ def start_conversation(db: Client, access: BusinessAccess, start_in: StartConver
 
 
 def get_conversation(db: Client, access: BusinessAccess, conversation_id: str) -> ConversationView:
-    snapshot = conversations_collection(db).document(conversation_id).get()
-    if not snapshot.exists:
-        raise not_found("Conversation")
-    conversation = Conversation.from_snapshot(snapshot)
-    if access.business_id not in conversation.business_ids:
+    conversation = crud.find_document(conversations_collection(db), conversation_id, Conversation)
+    if conversation is None or access.business_id not in conversation.business_ids:
         raise not_found("Conversation")
     return to_view(conversation, access.business_id)
 
 
 def open_conversation(db: Client, access: BusinessAccess, conversation_id: str) -> ConversationWithMessages:
-    """Returns the messages and marks the other side's messages as read."""
+    """Returns the messages and marks the other side's messages as read.
+
+    The page asks for this every few seconds, so it only writes when something is actually unread.
+    """
     conversation = get_conversation(db, access, conversation_id)
     messages = crud.list_documents(messages_collection(db, conversation_id), Message)
 
+    unread = [m for m in messages if m.sender_business_id != access.business_id and m.read_at is None]
+    if not unread and not conversation.unread:
+        return ConversationWithMessages(conversation=conversation, messages=messages)
+
     now = current_time_ms()
     batch = db.batch()
-    for message in messages:
-        if message.sender_business_id != access.business_id and message.read_at is None:
-            message.read_at = now
-            batch.update(messages_collection(db, conversation_id).document(message.id), {"readAt": now})
+    for message in unread:
+        message.read_at = now
+        batch.update(messages_collection(db, conversation_id).document(message.id), {"readAt": now})
     batch.update(conversations_collection(db).document(conversation_id), {f"lastReadAt.{access.business_id}": now})
     batch.commit()
+    _clear_cache(conversation)
 
     conversation.last_read_at[access.business_id] = now
     conversation.unread = False
@@ -121,4 +129,13 @@ def send_message(db: Client, access: BusinessAccess, conversation_id: str, messa
         },
     )
     batch.commit()
+    _clear_cache(get_conversation(db, access, conversation_id))
     return message
+
+
+def _clear_cache(conversation: Conversation) -> None:
+    """The conversation, its messages, and both businesses' conversation lists are now outdated."""
+    cache.bump(
+        cache.conversation_scope(conversation.id),
+        *[cache.business_scope(business_id) for business_id in conversation.business_ids],
+    )

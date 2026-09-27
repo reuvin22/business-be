@@ -1,8 +1,10 @@
 """Response shapes that add extra, calculated information to a stored model."""
 
+from app.models.business import Business
 from app.models.network import Conversation, Message
 from app.models.trade import Order
 from app.schemas.base import CamelModel
+from app.schemas.business import MyRole
 from app.schemas.payment import PaymentInstructions
 
 
@@ -23,3 +25,10 @@ class ConversationView(Conversation):
 class ConversationWithMessages(CamelModel):
     conversation: ConversationView
     messages: list[Message]
+
+
+class BusinessContext(CamelModel):
+    """A business and the logged-in user's role in it (one request instead of two)."""
+
+    business: Business
+    role: MyRole

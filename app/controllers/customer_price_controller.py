@@ -4,6 +4,7 @@ from app.controllers import crud
 from app.controllers.business_controller import find_business
 from app.controllers.crud import bad_request, not_found
 from app.controllers.product_controller import get_product, get_variant
+from app.core import cache
 from app.dependencies.business_access import BusinessAccess
 from app.models.network import CustomerPrice, customer_prices_collection
 from app.schemas.enums import Permission
@@ -16,9 +17,13 @@ def list_customer_prices(db: Client, business_id: str) -> list[CustomerPrice]:
 
 
 def list_prices_for_customer(db: Client, seller_id: str, customer_id: str) -> list[CustomerPrice]:
-    """The private prices one seller gives one customer."""
-    query = customer_prices_collection(db, seller_id).where(filter=FieldFilter("customerBusinessId", "==", customer_id))
-    return [CustomerPrice.from_snapshot(snapshot) for snapshot in query.stream()]
+    """The private prices one seller gives one customer (cached with the seller's data)."""
+
+    def read() -> list[CustomerPrice]:
+        query = customer_prices_collection(db, seller_id).where(filter=FieldFilter("customerBusinessId", "==", customer_id))
+        return [CustomerPrice.from_snapshot(snapshot) for snapshot in query.stream()]
+
+    return cache.cached_models(cache.business_scope(seller_id), f"customer-prices:{customer_id}", CustomerPrice, read)
 
 
 def create_customer_price(db: Client, access: BusinessAccess, price_in: CustomerPriceIn) -> CustomerPrice:

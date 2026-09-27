@@ -1,0 +1,25 @@
+{
+  "indexes": [],
+  "fieldOverrides": [
+    { "collectionGroup": "businesses", "fieldPath": "businessDescription", "indexes": [] },
+    { "collectionGroup": "businesses", "fieldPath": "businessLogo", "indexes": [] },
+    { "collectionGroup": "businesses", "fieldPath": "coverImage", "indexes": [] },
+    { "collectionGroup": "products", "fieldPath": "description", "indexes": [] },
+    { "collectionGroup": "products", "fieldPath": "specifications", "indexes": [] },
+    { "collectionGroup": "products", "fieldPath": "images", "indexes": [] },
+    { "collectionGroup": "products", "fieldPath": "orderRules", "indexes": [] },
+    { "collectionGroup": "variants", "fieldPath": "attributes", "indexes": [] },
+    { "collectionGroup": "locations", "fieldPath": "operatingHours", "indexes": [] },
+    { "collectionGroup": "orders", "fieldPath": "items", "indexes": [] },
+    { "collectionGroup": "orders", "fieldPath": "shippingAddress", "indexes": [] },
+    { "collectionGroup": "orders", "fieldPath": "notes", "indexes": [] },
+    { "collectionGroup": "conversations", "fieldPath": "lastMessage", "indexes": [] },
+    { "collectionGroup": "conversations", "fieldPath": "businessNames", "indexes": [] },
+    { "collectionGroup": "conversations", "fieldPath": "lastReadAt", "indexes": [] },
+    { "collectionGroup": "messages", "fieldPath": "message", "indexes": [] },
+    { "collectionGroup": "messages", "fieldPath": "attachments", "indexes": [] },
+    { "collectionGroup": "reviews", "fieldPath": "review", "indexes": [] },
+    { "collectionGroup": "reviews", "fieldPath": "response", "indexes": [] },
+    { "collectionGroup": "reviews", "fieldPath": "ratings", "indexes": [] }
+  ]
+}

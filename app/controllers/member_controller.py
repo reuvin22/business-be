@@ -3,6 +3,7 @@ from google.cloud.firestore import ArrayRemove, ArrayUnion, Client
 
 from app.controllers import crud
 from app.controllers.crud import bad_request
+from app.core import cache
 from app.core.firebase import find_user_by_email
 from app.core.permissions import ROLE_PERMISSIONS
 from app.dependencies.business_access import BusinessAccess
@@ -49,6 +50,7 @@ def add_member(db: Client, access: BusinessAccess, member_in: MemberAddIn) -> Me
     batch.set(member_ref, member.to_firestore())
     batch.update(business_document(db, access.business_id), {"memberUids": ArrayUnion([member.id])})
     batch.commit()
+    _clear_cache(access.business_id, member.id)
     return member
 
 
@@ -70,6 +72,7 @@ def update_member(db: Client, access: BusinessAccess, user_id: str, member_in: M
     batch.set(members_collection(db, access.business_id).document(user_id), updated.to_firestore())
     batch.update(business_document(db, access.business_id), {"memberUids": member_uids_change})
     batch.commit()
+    _clear_cache(access.business_id, user_id)
     return updated
 
 
@@ -87,3 +90,9 @@ def remove_member(db: Client, access: BusinessAccess, user_id: str) -> None:
     batch.delete(members_collection(db, access.business_id).document(user_id))
     batch.update(business_document(db, access.business_id), {"memberUids": ArrayRemove([user_id])})
     batch.commit()
+    _clear_cache(access.business_id, user_id)
+
+
+def _clear_cache(business_id: str, user_id: str) -> None:
+    """The team changed, and so did that person's "my businesses" list."""
+    cache.bump(cache.business_scope(business_id), cache.user_scope(user_id))

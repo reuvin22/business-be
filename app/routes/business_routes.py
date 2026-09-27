@@ -10,6 +10,7 @@ from app.models.member import Member
 from app.schemas.business import BusinessIn, MyRole
 from app.schemas.member import MemberAddIn, MemberUpdateIn
 from app.schemas.user import CurrentUser
+from app.schemas.views import BusinessContext
 
 router = APIRouter(prefix="/businesses", tags=["Businesses & team"])
 
@@ -32,6 +33,12 @@ def create_business(
 @router.get("/{business_id}", response_model=Business)
 def get_business(access: BusinessAccess = Depends(get_business_access)):
     return access.business
+
+
+@router.get("/{business_id}/context", response_model=BusinessContext)
+def get_business_context(access: BusinessAccess = Depends(get_business_access)):
+    """The business and your role in it, in one request. The business pages load this first."""
+    return business_controller.get_context(access)
 
 
 @router.get("/{business_id}/my-role", response_model=MyRole)

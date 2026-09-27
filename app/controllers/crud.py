@@ -2,12 +2,17 @@
 
 Example (from contact_controller.py):
     crud.create_document(contacts_collection(db, business_id), Contact, contact_in)
+
+Reads are cached in Redis (see app/core/cache.py). Writes mark the cache as outdated.
+Reads that happen right before a write skip the cache, so an update always starts from
+the latest data in Firestore.
 """
 
 from fastapi import HTTPException, status
 from google.cloud.firestore import CollectionReference, DocumentReference
 from pydantic import BaseModel
 
+from app.core import cache
 from app.models.base import FirestoreModel
 from app.utils.helpers import current_time_ms
 
@@ -24,21 +29,60 @@ def forbidden(message: str) -> HTTPException:
     return HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=message)
 
 
+# ---- Reading (cached) --------------------------------------------------------------------
+
+
 def list_documents(
     collection: CollectionReference, model_class: type[FirestoreModel], order_by: str = "createdAt"
 ) -> list:
     """Every document in a collection, oldest first."""
-    return [model_class.from_snapshot(snapshot) for snapshot in collection.order_by(order_by).stream()]
+    path = cache.collection_path(collection)
+    return cache.cached_models(
+        cache.scope_for_path(path),
+        f"list:{path}:{order_by}",
+        model_class,
+        lambda: [model_class.from_snapshot(snapshot) for snapshot in collection.order_by(order_by).stream()],
+    )
 
 
 def get_document(
     collection: CollectionReference, doc_id: str, model_class: type[FirestoreModel], what: str = "Item"
 ) -> FirestoreModel:
     """One document, or stops the request with 404."""
-    snapshot = collection.document(doc_id).get()
-    if not snapshot.exists:
+    doc_ref = collection.document(doc_id)
+    item = cache.cached_model(
+        cache.scope_for_path(doc_ref.path), f"doc:{doc_ref.path}", model_class, lambda: _read(doc_ref, model_class)
+    )
+    if item is None:
         raise not_found(what)
-    return model_class.from_snapshot(snapshot)
+    return item
+
+
+def find_document(
+    collection: CollectionReference, doc_id: str, model_class: type[FirestoreModel]
+) -> FirestoreModel | None:
+    """Like get_document, but returns None instead of stopping the request when it does not exist."""
+    doc_ref = collection.document(doc_id)
+    return cache.cached_model(
+        cache.scope_for_path(doc_ref.path), f"doc:{doc_ref.path}", model_class, lambda: _read(doc_ref, model_class)
+    )
+
+
+def get_single_document(doc_ref: DocumentReference, model_class: type[FirestoreModel]) -> FirestoreModel:
+    """For details that exist once per business (like legal info). Returns empty defaults if never saved."""
+    item = cache.cached_model(
+        cache.scope_for_path(doc_ref.path), f"doc:{doc_ref.path}", model_class, lambda: _read(doc_ref, model_class)
+    )
+    return item if item is not None else model_class(id=doc_ref.id)
+
+
+def _read(doc_ref: DocumentReference, model_class: type[FirestoreModel]) -> FirestoreModel | None:
+    """Reads one document straight from Firestore (no cache). None when it does not exist."""
+    snapshot = doc_ref.get()
+    return model_class.from_snapshot(snapshot) if snapshot.exists else None
+
+
+# ---- Writing (marks the cache as outdated) -----------------------------------------------
 
 
 def create_document(
@@ -49,6 +93,7 @@ def create_document(
     now = current_time_ms()
     item = model_class(**{**data.model_dump(), **extra_fields, "id": doc_ref.id, "created_at": now, "updated_at": now})
     doc_ref.set(item.to_firestore())
+    cache.bump(cache.scope_for_path(doc_ref.path))
     return item
 
 
@@ -57,30 +102,28 @@ def update_document(
     **extra_fields,
 ) -> FirestoreModel:
     """Replaces the form fields of a document. System fields that are not in `data` are kept."""
-    existing = get_document(collection, doc_id, model_class, what)
+    doc_ref = collection.document(doc_id)
+    existing = _read(doc_ref, model_class)
+    if existing is None:
+        raise not_found(what)
     item = model_class(**{**existing.model_dump(), **data.model_dump(), **extra_fields, "updated_at": current_time_ms()})
-    collection.document(doc_id).set(item.to_firestore())
+    doc_ref.set(item.to_firestore())
+    cache.bump(cache.scope_for_path(doc_ref.path))
     return item
 
 
 def delete_document(collection: CollectionReference, doc_id: str, what: str = "Item") -> None:
-    if not collection.document(doc_id).get().exists:
+    doc_ref = collection.document(doc_id)
+    if not doc_ref.get().exists:
         raise not_found(what)
-    collection.document(doc_id).delete()
-
-
-def get_single_document(doc_ref: DocumentReference, model_class: type[FirestoreModel]) -> FirestoreModel:
-    """For details that exist once per business (like legal info). Returns empty defaults if never saved."""
-    snapshot = doc_ref.get()
-    if snapshot.exists:
-        return model_class.from_snapshot(snapshot)
-    return model_class(id=doc_ref.id)
+    doc_ref.delete()
+    cache.bump(cache.scope_for_path(doc_ref.path))
 
 
 def save_single_document(
     doc_ref: DocumentReference, model_class: type[FirestoreModel], data: BaseModel, **extra_fields
 ) -> FirestoreModel:
-    existing = get_single_document(doc_ref, model_class)
+    existing = _read(doc_ref, model_class) or model_class(id=doc_ref.id)
     now = current_time_ms()
     item = model_class(
         **{
@@ -93,4 +136,5 @@ def save_single_document(
         }
     )
     doc_ref.set(item.to_firestore())
+    cache.bump(cache.scope_for_path(doc_ref.path))
     return item

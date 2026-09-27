@@ -5,6 +5,7 @@ from google.cloud.firestore import Client
 from app.controllers import crud
 from app.controllers.crud import bad_request
 from app.controllers.order_controller import get_order
+from app.core import cache
 from app.dependencies.business_access import BusinessAccess
 from app.models.business import business_document
 from app.models.network import Review, reviews_collection
@@ -24,7 +25,7 @@ def list_reviews(db: Client, business_id: str, include_hidden: bool = False) -> 
 def create_review(db: Client, access: BusinessAccess, order_id: str, review_in: ReviewIn) -> Review:
     """The buyer reviews the seller of one of its completed orders."""
     access.require(Permission.WRITE_REVIEWS)
-    order = get_order(db, access, order_id)
+    order = get_order(db, access, order_id, fresh=True)
     if order.buyer_business_id != access.business_id:
         raise bad_request("Only the buyer can review an order")
     if order.order_status != OrderStatus.COMPLETED:
@@ -52,6 +53,7 @@ def create_review(db: Client, access: BusinessAccess, order_id: str, review_in: 
     batch.commit()
 
     refresh_rating(db, order.seller_business_id)
+    cache.bump(cache.business_scope(order.seller_business_id), cache.business_scope(access.business_id))
     return review
 
 
@@ -71,6 +73,7 @@ def set_review_status(db: Client, business_id: str, review_id: str, status: Revi
     """Platform admins can hide a review that breaks the rules."""
     review = crud.get_document(reviews_collection(db, business_id), review_id, Review, "Review")
     reviews_collection(db, business_id).document(review_id).update({"status": status.value})
+    cache.bump(cache.business_scope(business_id))
     review.status = status
     refresh_rating(db, business_id)
     return review
@@ -78,6 +81,9 @@ def set_review_status(db: Client, business_id: str, review_id: str, status: Revi
 
 def refresh_rating(db: Client, business_id: str) -> None:
     """Recalculates the business's average rating from its published reviews."""
+    cache.bump(cache.business_scope(business_id))  # a review just changed: don't read an outdated cached list
     reviews = list_reviews(db, business_id)
     average = round(sum(r.rating for r in reviews) / len(reviews), 2) if reviews else 0
     business_document(db, business_id).update({"ratingAverage": average, "ratingCount": len(reviews)})
+    # The rating shows on the business and in the directory
+    cache.bump(cache.business_scope(business_id), cache.DIRECTORY)

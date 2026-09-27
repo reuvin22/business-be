@@ -1,10 +1,12 @@
 import os
 
+import fakeredis
 import httpx
 import pytest
 from fastapi.testclient import TestClient
 from google.cloud import firestore
 
+from app.core import cache
 from app.core.firebase import get_db
 from app.dependencies.auth import get_current_user
 from app.main import app
@@ -14,6 +16,15 @@ from app.schemas.user import CurrentUser
 # which is found through this environment variable, e.g. FIRESTORE_EMULATOR_HOST=127.0.0.1:8080
 EMULATOR_HOST = os.environ.get("FIRESTORE_EMULATOR_HOST")
 TEST_PROJECT = "demo-my-business"
+
+@pytest.fixture(autouse=True)
+def fake_redis():
+    """Every test gets its own empty in-memory Redis, so tests never touch the real cache."""
+    fake = fakeredis.FakeRedis(decode_responses=True)
+    cache.set_client(fake)
+    yield fake
+    cache.set_client(None)
+
 
 # Fake accounts used by the tests (instead of real Firebase users)
 ACCOUNTS = {
@@ -51,6 +62,12 @@ def client(monkeypatch):
 
     app.dependency_overrides.clear()
     httpx.delete(f"http://{EMULATOR_HOST}/emulator/v1/projects/{TEST_PROJECT}/databases/(default)/documents")
+
+
+@pytest.fixture
+def firestore_db():
+    """Direct access to the emulator database (to change data behind the API's back)."""
+    return firestore.Client(project=TEST_PROJECT)
 
 
 @pytest.fixture

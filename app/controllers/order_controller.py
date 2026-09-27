@@ -16,6 +16,7 @@ from collections import defaultdict
 from google.cloud import firestore
 from google.cloud.firestore import Client, DocumentReference, FieldFilter, Transaction
 
+from app.controllers import crud
 from app.controllers.business_controller import find_business
 from app.controllers.crud import bad_request, forbidden, not_found
 from app.controllers.customer_price_controller import list_prices_for_customer
@@ -25,6 +26,7 @@ from app.controllers.payment_method_controller import list_accepted_payment_type
 from app.controllers.pricing import calculate_delivery_fee, check_order_rules, find_unit_price
 from app.controllers.product_controller import list_prices
 from app.controllers.settings_controller import get_delivery, get_payment_terms
+from app.core import cache
 from app.dependencies.business_access import BusinessAccess
 from app.models.business import Business
 from app.models.inventory import InventoryItem, inventory_document
@@ -72,11 +74,10 @@ def build_quote(db: Client, buyer: Business, seller: Business, order_in: OrderIn
     lines: list[QuoteLine] = []
 
     for item in order_in.items:
-        product_snapshot = products_collection(db, seller.id).document(item.product_id).get()
-        if not product_snapshot.exists:
+        product = crud.find_document(products_collection(db, seller.id), item.product_id, Product)
+        if product is None:
             problems.append("A product in your order no longer exists.")
             continue
-        product = Product.from_snapshot(product_snapshot)
         name = product.product_name
         if product.visibility != Visibility.PUBLIC or product.status != ProductStatus.ACTIVE:
             problems.append(f"{name} is not available.")
@@ -84,11 +85,10 @@ def build_quote(db: Client, buyer: Business, seller: Business, order_in: OrderIn
 
         variant = None
         if item.variant_id:
-            variant_snapshot = variants_collection(db, seller.id, product.id).document(item.variant_id).get()
-            if not variant_snapshot.exists or Variant.from_snapshot(variant_snapshot).status != ActiveStatus.ACTIVE:
+            variant = crud.find_document(variants_collection(db, seller.id, product.id), item.variant_id, Variant)
+            if variant is None or variant.status != ActiveStatus.ACTIVE:
                 problems.append(f"{name}: this option is not available.")
                 continue
-            variant = Variant.from_snapshot(variant_snapshot)
             name = f"{product.product_name} ({variant.variant_name})"
 
         unit = (variant.unit if variant and variant.unit else product.unit) or "pcs"
@@ -198,13 +198,23 @@ def create_order(db: Client, access: BusinessAccess, order_in: OrderIn) -> Order
         updated_at=now,
     )
     order_ref.set(order.to_firestore())
+    _clear_cache(order)
     return order
+
+
+def _clear_cache(order: Order) -> None:
+    """An order belongs to two businesses, so both cached copies are now outdated."""
+    cache.bump(*[cache.business_scope(business_id) for business_id in order.business_ids])
 
 
 def list_orders(db: Client, access: BusinessAccess, side: str | None = None) -> list[Order]:
     """Orders this business is part of, newest first. side = "buying", "selling", or None for both."""
-    query = orders_collection(db).where(filter=FieldFilter("businessIds", "array_contains", access.business_id))
-    orders = [Order.from_snapshot(snapshot) for snapshot in query.stream()]
+
+    def read() -> list[Order]:
+        query = orders_collection(db).where(filter=FieldFilter("businessIds", "array_contains", access.business_id))
+        return [Order.from_snapshot(snapshot) for snapshot in query.stream()]
+
+    orders = cache.cached_models(cache.business_scope(access.business_id), "orders", Order, read)
     if side == "buying":
         orders = [o for o in orders if o.buyer_business_id == access.business_id]
     elif side == "selling":
@@ -212,13 +222,18 @@ def list_orders(db: Client, access: BusinessAccess, side: str | None = None) -> 
     return sorted(orders, key=lambda order: order.ordered_at, reverse=True)
 
 
-def get_order(db: Client, access: BusinessAccess, order_id: str) -> Order:
-    """An order this business is the buyer or seller of, or 404."""
-    snapshot = orders_collection(db).document(order_id).get()
-    if not snapshot.exists:
-        raise not_found("Order")
-    order = Order.from_snapshot(snapshot)
-    if access.business_id not in order.business_ids:
+def get_order(db: Client, access: BusinessAccess, order_id: str, fresh: bool = False) -> Order:
+    """An order this business is the buyer or seller of, or 404.
+
+    fresh=True skips the cache: use it before changing the order.
+    """
+
+    def read() -> Order | None:
+        snapshot = orders_collection(db).document(order_id).get()
+        return Order.from_snapshot(snapshot) if snapshot.exists else None
+
+    order = read() if fresh else cache.cached_model(cache.business_scope(access.business_id), f"order:{order_id}", Order, read)
+    if order is None or access.business_id not in order.business_ids:
         raise not_found("Order")
     return order
 
@@ -243,7 +258,7 @@ def get_order_view(db: Client, access: BusinessAccess, order_id: str) -> OrderVi
 
 
 def change_order_status(db: Client, access: BusinessAccess, order_id: str, status_in: OrderStatusIn) -> Order:
-    order = get_order(db, access, order_id)
+    order = get_order(db, access, order_id, fresh=True)
     is_seller = order.seller_business_id == access.business_id
     access.require(Permission.MANAGE_SALES_ORDERS if is_seller else Permission.PLACE_ORDERS)
 
@@ -258,7 +273,9 @@ def change_order_status(db: Client, access: BusinessAccess, order_id: str, statu
             raise bad_request("Choose the location the stock will come from")
 
     order_ref = orders_collection(db).document(order_id)
-    return _change_status(db.transaction(), db, order_ref, order.order_status, status_in)
+    updated = _change_status(db.transaction(), db, order_ref, order.order_status, status_in)
+    _clear_cache(updated)
+    return updated
 
 
 @firestore.transactional
@@ -339,7 +356,7 @@ def _change_status(
 
 def change_payment_status(db: Client, access: BusinessAccess, order_id: str, payment_in: PaymentStatusIn) -> Order:
     """The seller records payment (e.g. after seeing the bank transfer)."""
-    order = get_order(db, access, order_id)
+    order = get_order(db, access, order_id, fresh=True)
     if order.seller_business_id != access.business_id:
         raise bad_request("Only the seller can change the payment status")
     if not (access.can(Permission.MANAGE_SALES_ORDERS) or access.can(Permission.MANAGE_PAYMENTS)):
@@ -350,12 +367,13 @@ def change_payment_status(db: Client, access: BusinessAccess, order_id: str, pay
     orders_collection(db).document(order_id).update(
         {"paymentStatus": order.payment_status.value, "updatedAt": order.updated_at}
     )
+    _clear_cache(order)
     return order
 
 
 def change_order_charges(db: Client, access: BusinessAccess, order_id: str, charges_in: OrderChargesIn) -> Order:
     """The seller adjusts delivery fee, tax, or discount before confirming."""
-    order = get_order(db, access, order_id)
+    order = get_order(db, access, order_id, fresh=True)
     if order.seller_business_id != access.business_id:
         raise bad_request("Only the seller can change the charges")
     access.require(Permission.MANAGE_SALES_ORDERS)
@@ -368,4 +386,5 @@ def change_order_charges(db: Client, access: BusinessAccess, order_id: str, char
     order.total = round(max(order.subtotal + order.delivery_fee + order.tax - order.discount, 0), 2)
     order.updated_at = current_time_ms()
     orders_collection(db).document(order_id).set(order.to_firestore())
+    _clear_cache(order)
     return order

@@ -1,7 +1,10 @@
-from fastapi import FastAPI
+import re
+
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from app.core import cache
 from app.core.config import settings
 from app.core.firebase import get_firebase_app
 from app.routes import (
@@ -30,6 +33,24 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ---- Cache clearing ----------------------------------------------------------------------
+# After any successful change to /api/v1/businesses/{id}/..., everything cached for that
+# business (and the directory) is marked outdated. See app/core/cache.py for how this works.
+BUSINESS_URL = re.compile(r"^/api/v1/businesses/([^/]+)")
+READ_ONLY_POSTS = ("/orders/quote",)  # POSTs that don't change anything
+
+
+@app.middleware("http")
+async def clear_cache_after_changes(request: Request, call_next):
+    response = await call_next(request)
+    is_change = request.method in ("POST", "PUT", "PATCH", "DELETE") and response.status_code < 400
+    if is_change and not request.url.path.endswith(READ_ONLY_POSTS):
+        match = BUSINESS_URL.match(request.url.path)
+        if match:
+            cache.bump(cache.business_scope(match.group(1)), cache.DIRECTORY)
+    return response
 
 
 # Not versioned: hosting platforms (e.g. Render) check this path to see if the app is up

@@ -125,6 +125,50 @@ Design choices:
 | Relationships | "Acme is our SUPPLIER": the other side accepts or declines; either side can end it. |
 | Verification | Business uploads document links and requests a level (Basic, Identity, Business, Supplier). A platform admin approves or rejects; the badge says exactly what was checked. |
 
+## Speed: caching, indexes, and hosting
+
+### Redis cache
+Reads go through Redis first (`app/core/cache.py`); only a miss reads Firestore. Measured on real data:
+a public profile took about 2,000 ms from Firestore and about 70 ms from the cache.
+
+- **How changes stay visible:** cached keys contain a version number per business. Any change to
+  `/api/v1/businesses/{id}/...` bumps that business's version (middleware in `app/main.py`), so the
+  next read loads fresh data. Changes that affect another business too (orders, reviews, relationships,
+  messages) bump both businesses in their controller.
+- **If you add a new write** that does not go through `/api/v1/businesses/{id}/...` or the `crud` helpers,
+  call `cache.bump(...)` for every business it changes.
+- **If Redis is down** the API keeps working: it skips Redis for 30 seconds at a time and reads Firestore.
+  When Redis comes back, everything cached before the outage is thrown away.
+- Set `REDIS_URL` to turn it on (empty = no cache). `CACHE_TTL_SECONDS` (default 600) is a safety net:
+  entries expire even if nothing changed.
+- The frontend also remembers GET responses for 30 seconds and forgets them after any change.
+
+### Indexes and how data is split up
+- Every query filters on **one field** (for example `memberUids`, `businessIds`, `visibility`), which Firestore
+  indexes automatically, so no composite indexes are needed.
+- `firestore.indexes.json` turns **off** indexing for big fields that are never searched (descriptions,
+  images, message text, order items). That makes writes faster and cheaper. Deploy it with
+  `npx firebase-tools deploy --only firestore:indexes --project <your-project-id>`.
+- Data is already **partitioned by business**: each business's products, stock, contacts, and so on live
+  under `businesses/{id}/...`, so one busy business never slows down another.
+- Independent reads run **at the same time** (`app/utils/parallel.py`), e.g. the 11 parts of a public profile.
+
+### Hosting: put everything in one region
+Every Firestore or Redis call is a network trip, so the API server should be next to them.
+
+| Service | Where it is |
+| ------- | ----------- |
+| Firestore | `nam5` (United States). Fixed; it cannot be moved after the database is created. |
+| Redis (Redis Cloud) | Singapore |
+
+Pick the Render region closest to both. With Redis in Singapore and Firestore in the US, a US Render region
+makes cache misses fast but cache hits slow; a Singapore region makes cache hits fast. The best setup is a
+Redis database in the **same region as Render** (Redis Cloud lets you choose it when creating the database).
+
+**Render free plan:** the server goes to sleep after 15 minutes without traffic, and waking it can take
+from 30 seconds to several minutes. This is the biggest cause of slow first loads. Use a paid instance,
+or ping `/api/health` every 10 minutes (for example with a free uptime monitor like UptimeRobot).
+
 ## Tests
 
 Tests never touch your real Firestore. They use the **Firestore emulator** (needs [Java 11+](https://adoptium.net/) and Node.js).
@@ -157,6 +201,7 @@ The `Dockerfile` builds a small production image (no tests, no secrets). Render 
    | --- | ----- |
    | `CORS_ORIGINS` | your frontend URLs, e.g. `http://localhost:5173,https://my-business.onrender.com` |
    | `ADMIN_EMAILS` | your email |
+   | `REDIS_URL` | your Redis connection URL (turns the cache on) |
 
 5. **Health Check Path**: `/api/health`. After deploying, open `/api/health/firebase`: it says `ok`, or exactly what is wrong with the key setup.
 6. In the frontend, set `VITE_API_URL=https://<your-api>.onrender.com/api/v1` and rebuild it.
