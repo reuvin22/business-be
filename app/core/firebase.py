@@ -1,3 +1,6 @@
+import json
+from pathlib import Path
+
 import firebase_admin
 from firebase_admin import auth, credentials, firestore
 from google.cloud.firestore import Client
@@ -5,13 +8,30 @@ from google.cloud.firestore import Client
 from app.core.config import settings
 
 
+def load_credentials() -> credentials.Certificate:
+    """Reads the service account key from FIREBASE_CREDENTIALS_JSON, or else from the file at
+    FIREBASE_CREDENTIALS_PATH. Fails with a clear message (shown in the server logs) when neither works."""
+    if settings.firebase_credentials_json.strip():
+        try:
+            return credentials.Certificate(json.loads(settings.firebase_credentials_json))
+        except (json.JSONDecodeError, ValueError) as error:
+            raise RuntimeError(f"FIREBASE_CREDENTIALS_JSON is not a valid service account key: {error}") from error
+
+    path = Path(settings.firebase_credentials_path)
+    if not path.is_file():
+        raise RuntimeError(
+            f"Firebase key file not found at '{path.resolve()}'. "
+            "Set FIREBASE_CREDENTIALS_PATH to the key file, or put the key's JSON in FIREBASE_CREDENTIALS_JSON."
+        )
+    return credentials.Certificate(str(path))
+
+
 def get_firebase_app() -> firebase_admin.App:
     """Starts the Firebase Admin SDK the first time it is needed, then reuses it."""
     try:
         return firebase_admin.get_app()
     except ValueError:
-        cred = credentials.Certificate(settings.firebase_credentials_path)
-        return firebase_admin.initialize_app(cred)
+        return firebase_admin.initialize_app(load_credentials())
 
 
 def get_db() -> Client:

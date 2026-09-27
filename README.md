@@ -147,17 +147,18 @@ The `Dockerfile` builds a small production image (no tests, no secrets). Render 
 
 1. Push this folder to GitHub (the key file and `.env` are ignored, so they are not uploaded).
 2. Render → **New → Web Service** → pick the repo. Runtime: **Docker**. If the repo holds both projects, set **Root Directory** to `my-business-be`.
-3. **Environment → Secret Files**: add a file named `firebase-service-account.json` with the contents of your service account key.
-   Render puts it at `/etc/secrets/firebase-service-account.json`.
+3. Give the API your Firebase key, in **one** of these ways:
+   - **Environment Variable** `FIREBASE_CREDENTIALS_JSON` = the whole contents of the key file (easiest), or
+   - **Secret File** named `firebase-service-account.json` (Render puts it at `/etc/secrets/firebase-service-account.json`)
+     plus the environment variable `FIREBASE_CREDENTIALS_PATH` = `/etc/secrets/firebase-service-account.json`.
 4. **Environment → Environment Variables**:
 
    | Key | Value |
    | --- | ----- |
-   | `FIREBASE_CREDENTIALS_PATH` | `/etc/secrets/firebase-service-account.json` |
-   | `CORS_ORIGINS` | your frontend URL, e.g. `https://my-business.onrender.com` (comma-separate several) |
+   | `CORS_ORIGINS` | your frontend URLs, e.g. `http://localhost:5173,https://my-business.onrender.com` |
    | `ADMIN_EMAILS` | your email |
 
-5. **Health Check Path**: `/api/health`.
+5. **Health Check Path**: `/api/health`. After deploying, open `/api/health/firebase`: it says `ok`, or exactly what is wrong with the key setup.
 6. In the frontend, set `VITE_API_URL=https://<your-api>.onrender.com/api/v1` and rebuild it.
 
 Test the image locally (with Docker Desktop running):

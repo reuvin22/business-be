@@ -7,7 +7,10 @@ class Settings(BaseSettings):
     app_name: str = "My Business API"
 
     # Firebase service account key. Used to check login tokens and to read/write Firestore.
+    # Give EITHER the path to the key file, OR the whole key file contents (JSON text).
+    # The JSON option is handy on hosting platforms: paste the key into one environment variable.
     firebase_credentials_path: str = "firebase-service-account.json"
+    firebase_credentials_json: str = ""
 
     # Comma-separated list of frontend URLs that are allowed to call this API
     cors_origins: str = "http://localhost:5173"

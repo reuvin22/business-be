@@ -1,7 +1,9 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.core.config import settings
+from app.core.firebase import get_firebase_app
 from app.routes import (
     admin_routes,
     business_routes,
@@ -33,6 +35,16 @@ app.add_middleware(
 # Not versioned: hosting platforms (e.g. Render) check this path to see if the app is up
 @app.get("/api/health", tags=["Health"])
 def health_check():
+    return {"status": "ok"}
+
+
+@app.get("/api/health/firebase", tags=["Health"])
+def firebase_check():
+    """Open this in a browser after deploying: it says whether the Firebase key could be loaded."""
+    try:
+        get_firebase_app()
+    except Exception as error:  # report any setup problem instead of a bare 500
+        return JSONResponse(status_code=503, content={"status": "error", "detail": str(error)})
     return {"status": "ok"}
 
 
