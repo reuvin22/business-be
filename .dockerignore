@@ -1,0 +1,12 @@
+# Keep secrets, local files, and tests out of the image
+.env
+*.json
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+tests/
+*.log
+firestore.rules
+README.md

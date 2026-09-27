@@ -19,7 +19,7 @@ Before the first run, create the database: Firebase Console → **Firestore Data
 python -m venv .venv
 .venv\Scripts\activate          # Windows
 # source .venv/bin/activate     # macOS / Linux
-pip install -r requirements.txt
+pip install -r requirements-dev.txt   # the app + test tools
 
 # 2. Settings
 copy .env.example .env          # Windows  (cp on macOS / Linux)
@@ -140,6 +140,34 @@ pytest
 ```
 
 Without the emulator, `pytest` runs the validation and pricing tests and skips the rest.
+
+## Deploy to Render (Docker)
+
+The `Dockerfile` builds a small production image (no tests, no secrets). Render passes the port in `$PORT`.
+
+1. Push this folder to GitHub (the key file and `.env` are ignored, so they are not uploaded).
+2. Render → **New → Web Service** → pick the repo. Runtime: **Docker**. If the repo holds both projects, set **Root Directory** to `my-business-be`.
+3. **Environment → Secret Files**: add a file named `firebase-service-account.json` with the contents of your service account key.
+   Render puts it at `/etc/secrets/firebase-service-account.json`.
+4. **Environment → Environment Variables**:
+
+   | Key | Value |
+   | --- | ----- |
+   | `FIREBASE_CREDENTIALS_PATH` | `/etc/secrets/firebase-service-account.json` |
+   | `CORS_ORIGINS` | your frontend URL, e.g. `https://my-business.onrender.com` (comma-separate several) |
+   | `ADMIN_EMAILS` | your email |
+
+5. **Health Check Path**: `/api/health`.
+6. In the frontend, set `VITE_API_URL=https://<your-api>.onrender.com/api` and rebuild it.
+
+Test the image locally (with Docker Desktop running):
+
+```bash
+docker build -t my-business-be .
+docker run -p 8000:8000 --env-file .env -e FIREBASE_CREDENTIALS_PATH=/secrets/key.json -v "%cd%/firebase-service-account.json:/secrets/key.json:ro" my-business-be
+```
+
+On Render's free plan the service sleeps after ~15 minutes without traffic; the first request after that takes a while.
 
 ## Common changes
 
