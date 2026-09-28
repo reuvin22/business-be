@@ -79,6 +79,16 @@ class VariantIn(CamelModel):
     status: ActiveStatus = ActiveStatus.ACTIVE
 
 
+class VariantDraft(VariantIn):
+    """A variant inside the product form.
+
+    key: the variant's id when it already exists, or any temporary name for a new one (e.g. "new-1").
+    Price tiers point to a variant by this key.
+    """
+
+    key: str = Field(min_length=1)
+
+
 class PriceIn(CamelModel):
     """One price tier (section 9). Example tiers: 1-9 pcs = 120, 10-49 = 110, 50+ = 100."""
 
@@ -98,4 +108,28 @@ class PriceIn(CamelModel):
         if self.maximum_quantity and self.maximum_quantity < self.minimum_quantity:
             raise ValueError("maximum quantity must be at least the minimum quantity")
         check_date_order(self.effective_from, self.effective_until, "effective until must be after effective from")
+        return self
+
+
+class PriceDraft(PriceIn):
+    """A price tier inside the product form."""
+
+    id: str | None = None  # the tier's id when it already exists; None = new
+    variant_key: str | None = None  # which variant (its key in the form); None = the whole product
+
+
+class ProductFormIn(ProductIn):
+    """A product with its variants and price tiers, saved together in one step."""
+
+    variants: list[VariantDraft] = []
+    prices: list[PriceDraft] = []
+
+    @model_validator(mode="after")
+    def check_links(self):
+        keys = [variant.key for variant in self.variants]
+        if len(keys) != len(set(keys)):
+            raise ValueError("each variant needs its own key")
+        for price in self.prices:
+            if price.variant_key and price.variant_key not in keys:
+                raise ValueError("a price tier points to a variant that is not in the form")
         return self

@@ -2,6 +2,7 @@
 
 from app.models.business import Business
 from app.models.network import Conversation, Message
+from app.models.product import Price, Product, Variant
 from app.models.trade import Order
 from app.schemas.base import CamelModel
 from app.schemas.business import MyRole
@@ -32,3 +33,11 @@ class BusinessContext(CamelModel):
 
     business: Business
     role: MyRole
+
+
+class ProductFull(CamelModel):
+    """A product with its variants and price tiers (what the product form edits)."""
+
+    product: Product
+    variants: list[Variant]
+    prices: list[Price]

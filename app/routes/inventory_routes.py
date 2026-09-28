@@ -1,12 +1,12 @@
 """Stock levels per location, and walk-in sales."""
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 from google.cloud.firestore import Client
 
 from app.controllers import inventory_controller, sale_controller
 from app.core.firebase import get_db
 from app.dependencies.business_access import BusinessAccess, get_business_access
-from app.models.inventory import InventoryItem
+from app.models.inventory import InventoryItem, StockMovement
 from app.models.trade import Sale
 from app.schemas.inventory import InventoryAdjustIn, InventoryIn, InventoryUpdateIn
 from app.schemas.sale import SaleIn
@@ -51,6 +51,21 @@ def adjust_inventory(
 @router.delete("/inventory/{inventory_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_inventory(inventory_id: str, db: Client = Depends(get_db), access: BusinessAccess = Depends(get_business_access)):
     inventory_controller.delete_inventory(db, access, inventory_id)
+
+
+# ---- Stock history ------------------------------------------------------------------------
+
+
+@router.get("/stock-movements", response_model=list[StockMovement])
+def list_stock_movements(
+    product_id: str | None = None,
+    location_id: str | None = None,
+    limit: int = Query(default=300, ge=1, le=1000),
+    db: Client = Depends(get_db),
+    access: BusinessAccess = Depends(get_business_access),
+):
+    """Every change to quantities on hand, newest first. Filter with ?product_id= and/or ?location_id=."""
+    return inventory_controller.list_movements(db, access.business_id, product_id, location_id, limit)
 
 
 # ---- Walk-in sales ------------------------------------------------------------------------

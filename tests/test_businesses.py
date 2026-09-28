@@ -60,14 +60,14 @@ def test_supplier_profile_and_directory_search(client):
 
 def test_public_profile_hides_private_details(client):
     business_id = create_business(client)["id"]
-    client.post(f"/api/v1/businesses/{business_id}/payment-methods", json={"paymentType": "BANK_TRANSFER", "accountNumber": "123"})
+    client.post(f"/api/v1/businesses/{business_id}/payment-methods", json={"paymentType": "BANK_TRANSFER", "accountNumber": "SECRET-ACCOUNT-0042"})
     client.post(f"/api/v1/businesses/{business_id}/contacts", json={"firstName": "Maria", "position": "PURCHASING"})
     client.post(f"/api/v1/businesses/{business_id}/contacts", json={"firstName": "Hidden", "showOnProfile": False})
 
     login_as("buyer@test.com")
     profile = client.get(f"/api/v1/directory/businesses/{business_id}").json()
     assert profile["paymentTypes"] == ["BANK_TRANSFER"]
-    assert "123" not in str(profile)
+    assert "SECRET-ACCOUNT-0042" not in str(profile)
     assert [c["firstName"] for c in profile["contacts"]] == ["Maria"]
     assert "memberUids" not in profile["business"]
 

@@ -21,7 +21,7 @@ from app.controllers.business_controller import find_business
 from app.controllers.crud import bad_request, forbidden, not_found
 from app.controllers.customer_price_controller import list_prices_for_customer
 from app.controllers.delivery_zone_controller import list_delivery_zones
-from app.controllers.inventory_controller import calculate_stock
+from app.controllers.inventory_controller import StockNames, calculate_stock, location_name, new_movement
 from app.controllers.payment_method_controller import list_accepted_payment_types, list_payment_methods
 from app.controllers.pricing import calculate_delivery_fee, check_order_rules, find_unit_price
 from app.controllers.product_controller import list_prices
@@ -29,7 +29,7 @@ from app.controllers.settings_controller import get_delivery, get_payment_terms
 from app.core import cache
 from app.dependencies.business_access import BusinessAccess
 from app.models.business import Business
-from app.models.inventory import InventoryItem, inventory_document
+from app.models.inventory import InventoryItem, StockMovement, inventory_document
 from app.models.product import Product, Variant, products_collection, variants_collection
 from app.models.profile import locations_collection
 from app.models.trade import Order, OrderItem, orders_collection
@@ -40,6 +40,7 @@ from app.schemas.enums import (
     OrderStatus,
     Permission,
     ProductStatus,
+    StockMovementType,
     Visibility,
 )
 from app.schemas.order import OrderChargesIn, OrderIn, OrderStatusIn, PaymentStatusIn, Quote, QuoteLine
@@ -273,14 +274,22 @@ def change_order_status(db: Client, access: BusinessAccess, order_id: str, statu
             raise bad_request("Choose the location the stock will come from")
 
     order_ref = orders_collection(db).document(order_id)
-    updated = _change_status(db.transaction(), db, order_ref, order.order_status, status_in)
+    ship_from = status_in.fulfillment_location_id or order.fulfillment_location_id
+    ship_from_name = location_name(db, order.seller_business_id, ship_from) if ship_from else ""
+    updated = _change_status(db.transaction(), db, access, order_ref, order.order_status, status_in, ship_from_name)
     _clear_cache(updated)
     return updated
 
 
 @firestore.transactional
 def _change_status(
-    transaction: Transaction, db: Client, order_ref: DocumentReference, expected_status: OrderStatus, status_in: OrderStatusIn
+    transaction: Transaction,
+    db: Client,
+    access: BusinessAccess,
+    order_ref: DocumentReference,
+    expected_status: OrderStatus,
+    status_in: OrderStatusIn,
+    ship_from_name: str,
 ) -> Order:
     # In a transaction, all reads must happen before any writes.
     order = Order.from_snapshot(order_ref.get(transaction=transaction))
@@ -292,6 +301,7 @@ def _change_status(
 
     # 1. Work out the stock changes (if any) and read the stock records
     stock_updates: list[tuple[DocumentReference, InventoryItem]] = []
+    history: list[tuple[DocumentReference, StockMovement]] = []  # stock history lines (when shipping)
     touches_stock = new_status in (OrderStatus.CONFIRMED, OrderStatus.SHIPPED) or (
         new_status == OrderStatus.CANCELLED and old_status == OrderStatus.CONFIRMED
     )
@@ -300,11 +310,13 @@ def _change_status(
         quantity_by_ref: dict[str, int] = defaultdict(int)
         refs: dict[str, DocumentReference] = {}
         names: dict[str, str] = {}
+        stock_names_by_ref: dict[str, StockNames] = {}
         for item in order.items:
             ref = inventory_document(db, order.seller_business_id, item.product_id, item.variant_id, location_id)
             refs[ref.id] = ref
             quantity_by_ref[ref.id] += item.quantity
             names[ref.id] = f"{item.product_name} {item.variant_name}".strip()
+            stock_names_by_ref[ref.id] = StockNames(item.product_name, item.variant_name, ship_from_name)
 
         for ref_id, ref in refs.items():
             snapshot = ref.get(transaction=transaction)
@@ -322,6 +334,19 @@ def _change_status(
             elif new_status == OrderStatus.SHIPPED:
                 stock.quantity -= quantity
                 stock.reserved_quantity = max(stock.reserved_quantity - quantity, 0)
+                history.append(
+                    new_movement(
+                        db,
+                        order.seller_business_id,
+                        stock,
+                        stock_names_by_ref[ref_id],
+                        StockMovementType.ORDER_SHIPPED,
+                        -quantity,
+                        access.user,
+                        reference_id=order.id,
+                        reference_label=order.order_number,
+                    )
+                )
             else:  # cancelling a confirmed order
                 stock.reserved_quantity = max(stock.reserved_quantity - quantity, 0)
 
@@ -350,6 +375,8 @@ def _change_status(
     # 3. Write everything
     for ref, stock in stock_updates:
         transaction.set(ref, stock.to_firestore())
+    for ref, movement in history:
+        transaction.set(ref, movement.to_firestore())
     transaction.set(order_ref, order.to_firestore())
     return order
 

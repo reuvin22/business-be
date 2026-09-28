@@ -11,7 +11,8 @@ from app.models.product import Price, Product, Variant
 from app.models.profile import Brand
 from app.schemas.brand import BrandIn
 from app.schemas.network import CustomerPriceIn
-from app.schemas.product import PriceIn, ProductIn, VariantIn
+from app.schemas.product import PriceIn, ProductFormIn, ProductIn, VariantIn
+from app.schemas.views import ProductFull
 
 router = APIRouter(prefix="/businesses/{business_id}", tags=["Catalog"])
 
@@ -48,6 +49,26 @@ def list_products(db: Client = Depends(get_db), access: BusinessAccess = Depends
     return product_controller.list_products(db, access.business_id)
 
 
+@router.post("/products/full", response_model=ProductFull, status_code=status.HTTP_201_CREATED)
+def create_product_full(form: ProductFormIn, db: Client = Depends(get_db), access: BusinessAccess = Depends(get_business_access)):
+    """Create a product together with its variants and price tiers (the product form)."""
+    return product_controller.save_product_full(db, access, form)
+
+
+@router.get("/products/{product_id}/full", response_model=ProductFull)
+def get_product_full(product_id: str, db: Client = Depends(get_db), access: BusinessAccess = Depends(get_business_access)):
+    """A product with its variants and price tiers."""
+    return product_controller.get_product_full(db, access.business_id, product_id)
+
+
+@router.put("/products/{product_id}/full", response_model=ProductFull)
+def update_product_full(
+    product_id: str, form: ProductFormIn, db: Client = Depends(get_db), access: BusinessAccess = Depends(get_business_access)
+):
+    """Save the product form: details, variants, and price tiers. Variants and tiers left out are deleted."""
+    return product_controller.save_product_full(db, access, form, product_id)
+
+
 @router.get("/products/{product_id}", response_model=Product)
 def get_product(product_id: str, db: Client = Depends(get_db), access: BusinessAccess = Depends(get_business_access)):
     return product_controller.get_product(db, access.business_id, product_id)
@@ -71,6 +92,12 @@ def delete_product(product_id: str, db: Client = Depends(get_db), access: Busine
 
 
 # ---- Variants -----------------------------------------------------------------------------
+
+
+@router.get("/prices", response_model=list[Price])
+def list_all_prices(db: Client = Depends(get_db), access: BusinessAccess = Depends(get_business_access)):
+    """Every price tier of every product, in one request (e.g. for the product list)."""
+    return product_controller.list_all_prices(db, access.business_id)
 
 
 @router.get("/variants", response_model=list[Variant])

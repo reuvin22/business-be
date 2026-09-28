@@ -51,7 +51,7 @@ def get_document(
     """One document, or stops the request with 404."""
     doc_ref = collection.document(doc_id)
     item = cache.cached_model(
-        cache.scope_for_path(doc_ref.path), f"doc:{doc_ref.path}", model_class, lambda: _read(doc_ref, model_class)
+        cache.scope_for_path(doc_ref.path), f"doc:{doc_ref.path}", model_class, lambda: read_fresh(doc_ref, model_class)
     )
     if item is None:
         raise not_found(what)
@@ -64,20 +64,21 @@ def find_document(
     """Like get_document, but returns None instead of stopping the request when it does not exist."""
     doc_ref = collection.document(doc_id)
     return cache.cached_model(
-        cache.scope_for_path(doc_ref.path), f"doc:{doc_ref.path}", model_class, lambda: _read(doc_ref, model_class)
+        cache.scope_for_path(doc_ref.path), f"doc:{doc_ref.path}", model_class, lambda: read_fresh(doc_ref, model_class)
     )
 
 
 def get_single_document(doc_ref: DocumentReference, model_class: type[FirestoreModel]) -> FirestoreModel:
     """For details that exist once per business (like legal info). Returns empty defaults if never saved."""
     item = cache.cached_model(
-        cache.scope_for_path(doc_ref.path), f"doc:{doc_ref.path}", model_class, lambda: _read(doc_ref, model_class)
+        cache.scope_for_path(doc_ref.path), f"doc:{doc_ref.path}", model_class, lambda: read_fresh(doc_ref, model_class)
     )
     return item if item is not None else model_class(id=doc_ref.id)
 
 
-def _read(doc_ref: DocumentReference, model_class: type[FirestoreModel]) -> FirestoreModel | None:
-    """Reads one document straight from Firestore (no cache). None when it does not exist."""
+def read_fresh(doc_ref: DocumentReference, model_class: type[FirestoreModel]) -> FirestoreModel | None:
+    """Reads one document straight from Firestore (no cache), e.g. right before changing it.
+    None when it does not exist."""
     snapshot = doc_ref.get()
     return model_class.from_snapshot(snapshot) if snapshot.exists else None
 
@@ -103,7 +104,7 @@ def update_document(
 ) -> FirestoreModel:
     """Replaces the form fields of a document. System fields that are not in `data` are kept."""
     doc_ref = collection.document(doc_id)
-    existing = _read(doc_ref, model_class)
+    existing = read_fresh(doc_ref, model_class)
     if existing is None:
         raise not_found(what)
     item = model_class(**{**existing.model_dump(), **data.model_dump(), **extra_fields, "updated_at": current_time_ms()})
@@ -123,7 +124,7 @@ def delete_document(collection: CollectionReference, doc_id: str, what: str = "I
 def save_single_document(
     doc_ref: DocumentReference, model_class: type[FirestoreModel], data: BaseModel, **extra_fields
 ) -> FirestoreModel:
-    existing = _read(doc_ref, model_class) or model_class(id=doc_ref.id)
+    existing = read_fresh(doc_ref, model_class) or model_class(id=doc_ref.id)
     now = current_time_ms()
     item = model_class(
         **{

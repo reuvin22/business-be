@@ -180,6 +180,18 @@ class PriceType(StrEnum):
     SPECIAL = "SPECIAL"
 
 
+class StockMovementType(StrEnum):
+    """Why the quantity on hand changed (one line in the stock history)."""
+
+    STOCK_ADDED = "STOCK_ADDED"  # a new stock record was created
+    ADJUSTMENT = "ADJUSTMENT"  # someone added or removed stock (delivery received, damaged, ...)
+    CORRECTION = "CORRECTION"  # someone typed in a new quantity
+    SALE = "SALE"  # walk-in sale
+    SALE_UNDONE = "SALE_UNDONE"  # a walk-in sale was undone, stock put back
+    ORDER_SHIPPED = "ORDER_SHIPPED"  # an order left the location
+    RECORD_REMOVED = "RECORD_REMOVED"  # the stock record was deleted
+
+
 class StockStatus(StrEnum):
     IN_STOCK = "IN_STOCK"
     LOW_STOCK = "LOW_STOCK"
