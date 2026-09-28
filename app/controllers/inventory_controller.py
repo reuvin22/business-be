@@ -136,6 +136,12 @@ def list_movements(
 
 def create_inventory(db: Client, access: BusinessAccess, inventory_in: InventoryIn) -> InventoryItem:
     access.require(Permission.MANAGE_INVENTORY)
+    return add_stock_record(db, access, inventory_in)
+
+
+def add_stock_record(db: Client, access: BusinessAccess, inventory_in: InventoryIn, note: str = "") -> InventoryItem:
+    """Creates the stock record for a product at a location (no permission check: the caller checks).
+    Also used by the selling app when stock arrives for something the store never had."""
     get_product(db, access.business_id, inventory_in.product_id)
     if inventory_in.variant_id:
         get_variant(db, access.business_id, inventory_in.product_id, inventory_in.variant_id)
@@ -152,7 +158,7 @@ def create_inventory(db: Client, access: BusinessAccess, inventory_in: Inventory
     item = calculate_stock(InventoryItem(**inventory_in.model_dump(), id=doc_ref.id, created_at=now, updated_at=now))
     names = stock_names(db, access.business_id, item.product_id, item.variant_id, item.location_id)
     movement_ref, movement = new_movement(
-        db, access.business_id, item, names, StockMovementType.STOCK_ADDED, item.quantity, access.user
+        db, access.business_id, item, names, StockMovementType.STOCK_ADDED, item.quantity, access.user, note=note
     )
 
     batch = db.batch()
@@ -194,6 +200,14 @@ def adjust_inventory(db: Client, access: BusinessAccess, inventory_id: str, adju
     doc_ref = inventory_collection(db, access.business_id).document(inventory_id)
     item = _read_stock(doc_ref)
     names = stock_names(db, access.business_id, item.product_id, item.variant_id, item.location_id)
+    return apply_adjustment(db, access, doc_ref, names, adjust_in)
+
+
+def apply_adjustment(
+    db: Client, access: BusinessAccess, doc_ref: DocumentReference, names: StockNames, adjust_in: InventoryAdjustIn
+) -> InventoryItem:
+    """Adds or removes stock and writes the history line, in one transaction (no permission check:
+    the caller checks). Also used by the selling app."""
     return _adjust(db.transaction(), db, access, doc_ref, names, adjust_in)
 
 

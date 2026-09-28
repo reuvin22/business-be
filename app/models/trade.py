@@ -86,6 +86,9 @@ class Sale(SaleIn, FirestoreModel):
     product_name: str = ""
     variant_name: str = ""
     unit_cost: float | None = None  # the product's cost price at the time of the sale
+    # Set when the sale was made in the selling app (one receipt can have several sales)
+    receipt_id: str = ""
+    receipt_number: str = ""
 
 
 def sales_collection(db: Client, business_id: str) -> CollectionReference:

@@ -32,6 +32,7 @@ ACCOUNTS = {
     "buyer@test.com": "buyer-uid",
     "staff@test.com": "staff-uid",
     "admin@test.com": "admin-uid",
+    "seller@test.com": "seller-uid",
 }
 
 

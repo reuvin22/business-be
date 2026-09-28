@@ -20,6 +20,8 @@ ROLE_PERMISSIONS: dict[MemberRole, list[Permission]] = {
         Permission.WRITE_REVIEWS,
     ],
     MemberRole.ACCOUNTING: [Permission.MANAGE_PAYMENTS],
-    MemberRole.WAREHOUSE: [Permission.MANAGE_INVENTORY, Permission.MANAGE_SALES_ORDERS],
+    MemberRole.WAREHOUSE: [Permission.MANAGE_INVENTORY, Permission.MANAGE_SALES_ORDERS, Permission.USE_POS],
     MemberRole.STAFF: [],  # can view everything, change nothing
+    # Sellers only use the selling app, at the location they were given
+    MemberRole.SELLER: [Permission.USE_POS],
 }

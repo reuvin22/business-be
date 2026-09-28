@@ -108,6 +108,7 @@ class MemberRole(StrEnum):
     ACCOUNTING = "ACCOUNTING"
     WAREHOUSE = "WAREHOUSE"
     STAFF = "STAFF"
+    SELLER = "SELLER"  # selling-app account created by the business (see seller_controller.py)
 
 
 class MemberStatus(StrEnum):
@@ -128,6 +129,7 @@ class Permission(StrEnum):
     SEND_MESSAGES = "messages.send"
     MANAGE_RELATIONSHIPS = "relationships.manage"
     WRITE_REVIEWS = "reviews.write"
+    USE_POS = "pos.use"  # sell and receive stock in the selling app (my-business-pos)
 
 
 # ---- Locations -------------------------------------------------------------------------------
@@ -318,3 +320,17 @@ class ReviewStatus(StrEnum):
 class ConversationStatus(StrEnum):
     OPEN = "OPEN"
     ARCHIVED = "ARCHIVED"
+
+
+class PosPaymentType(StrEnum):
+    """How a walk-in customer paid at the counter (selling app)."""
+
+    CASH = "CASH"
+    CARD = "CARD"
+    E_WALLET = "E_WALLET"
+    BANK_TRANSFER = "BANK_TRANSFER"
+
+
+class ReceiptStatus(StrEnum):
+    COMPLETED = "COMPLETED"
+    VOIDED = "VOIDED"  # undone; the stock was put back

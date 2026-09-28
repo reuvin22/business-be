@@ -79,7 +79,7 @@ def delete_business(db: Client, access: BusinessAccess) -> None:
     cache.bump(
         cache.business_scope(access.business_id),
         cache.DIRECTORY,
-        *[cache.user_scope(uid) for uid in access.business.member_uids],
+        *[cache.user_scope(uid) for uid in access.business.member_uids + access.business.seller_uids],
     )
 
 

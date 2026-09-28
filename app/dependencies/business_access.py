@@ -49,7 +49,29 @@ def get_business_access(
     """Add this to any route with {business_id} in its URL. Only active members get through.
 
     Non-members get 404 (not 403), so they cannot tell whether the business exists.
+    Seller accounts get 403: they may only use the selling app (see get_pos_access).
     """
+    access = _load_access(db, business_id, user)
+    if access.member.role == MemberRole.SELLER:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Seller accounts can only use the selling app"
+        )
+    return access
+
+
+def get_pos_access(
+    business_id: str,
+    db: Client = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+) -> BusinessAccess:
+    """For the selling app's routes (/businesses/{business_id}/pos/...). Sellers and any member
+    with the 'pos.use' permission get through."""
+    access = _load_access(db, business_id, user)
+    access.require(Permission.USE_POS)
+    return access
+
+
+def _load_access(db: Client, business_id: str, user: CurrentUser) -> BusinessAccess:
     not_found = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Business not found")
 
     # This runs on every business request, so both reads are cached (and read in parallel on a miss)

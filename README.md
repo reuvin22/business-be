@@ -124,6 +124,36 @@ Design choices:
 | Reviews | Only the buyer of a COMPLETED order can review, once per order, with separate 1–5 scores. The seller can reply; admins can hide. |
 | Relationships | "Acme is our SUPPLIER": the other side accepts or declines; either side can end it. |
 | Verification | Business uploads document links and requests a level (Basic, Identity, Business, Supplier). A platform admin approves or rejects; the badge says exactly what was checked. |
+| Selling app | See "Selling app (my-business-pos)" below. |
+
+## Selling app (my-business-pos)
+
+A separate web app for selling at the counter, on the main business's own products and stock.
+
+- **Seller accounts:** in the main app, Team → Sellers → *Create seller account* (name, email, first password,
+  store). The API creates the Firebase login (`app/controllers/seller_controller.py`) and adds a member with the
+  `SELLER` role. Sellers can only use the selling app routes (`get_pos_access`); every other business route
+  answers 403. Owners and members with the `pos.use` permission can use the selling app too.
+- **Selling:** `POST /businesses/{id}/pos/checkouts`. The server works out the prices (RETAIL tiers win when a
+  product has them), checks the stock, and in one transaction takes it out, saves the receipt
+  (`businesses/{id}/receipts`), one Sale per line, and the stock history. Voiding a receipt puts the stock back.
+- **Stock in / out:** `POST /businesses/{id}/pos/stock-changes` (+ delivery received, − damaged with a reason).
+- **Realtime:** both apps *listen* to `businesses/{id}/inventory` (and the selling app to `products`) straight
+  from Firestore, so a sale shows on the owner's Inventory page within a second, and a delivery recorded
+  in the main app shows on the till. `firestore.rules` allows active members to **read** only those two
+  collections (sellers only their own store's stock); all writes still go through this API.
+  **Deploy the rules** or the apps fall back to refreshing every 10–15 seconds:
+  `npx firebase-tools deploy --only firestore:rules --project <your-project-id>`
+
+### Running everything locally on the emulators
+No real Firebase needed. The backend skips the key file when both emulator variables are set:
+
+```powershell
+npx firebase-tools emulators:start --only "auth,firestore" --project demo-my-business   # terminal 1
+$env:FIRESTORE_EMULATOR_HOST="127.0.0.1:8080"; $env:FIREBASE_AUTH_EMULATOR_HOST="127.0.0.1:9099"
+$env:GCLOUD_PROJECT="demo-my-business"; fastapi dev app/main.py                         # terminal 2
+```
+In both frontends set `VITE_FIREBASE_EMULATORS=true` and `VITE_FIREBASE_PROJECT_ID=demo-my-business`.
 
 ## Speed: caching, indexes, and hosting
 

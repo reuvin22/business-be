@@ -17,6 +17,8 @@ class Member(FirestoreModel):
     permissions: list[Permission] = []
     status: MemberStatus = MemberStatus.ACTIVE
     joined_at: int = 0
+    # Sellers only: the store (location) they sell from. None = any location.
+    location_id: str | None = None
 
     @property
     def user_id(self) -> str:

@@ -1,8 +1,10 @@
 import json
+import os
 from pathlib import Path
 
 import firebase_admin
 from firebase_admin import auth, credentials, firestore
+from google.auth.credentials import AnonymousCredentials
 from google.cloud.firestore import Client
 
 from app.core.config import settings
@@ -31,7 +33,23 @@ def get_firebase_app() -> firebase_admin.App:
     try:
         return firebase_admin.get_app()
     except ValueError:
+        if using_emulators():
+            project_id = os.environ.get("GCLOUD_PROJECT", "demo-my-business")
+            return firebase_admin.initialize_app(_EmulatorCredential(), {"projectId": project_id})
         return firebase_admin.initialize_app(load_credentials())
+
+
+def using_emulators() -> bool:
+    """True for local development against the Firebase emulators (Auth + Firestore), which need
+    no real key. Never set these two variables on a real server."""
+    return bool(os.environ.get("FIREBASE_AUTH_EMULATOR_HOST") and os.environ.get("FIRESTORE_EMULATOR_HOST"))
+
+
+class _EmulatorCredential(credentials.Base):
+    """The emulators accept anyone, so there is nothing to sign in with."""
+
+    def get_credential(self):
+        return AnonymousCredentials()
 
 
 def get_db() -> Client:
@@ -57,3 +75,22 @@ def find_user_by_email(email: str) -> dict | None:
     except auth.UserNotFoundError:
         return None
     return {"uid": user.uid, "email": user.email or email, "display_name": user.display_name or ""}
+
+
+# ---- Accounts made by a business (seller accounts for the selling app) --------------------
+
+
+def create_account(email: str, password: str, display_name: str) -> dict:
+    """Creates a Firebase email + password account. Returns {uid, email, display_name}.
+
+    Raises auth.EmailAlreadyExistsError when the email is taken."""
+    user = auth.create_user(email=email, password=password, display_name=display_name or None, app=get_firebase_app())
+    return {"uid": user.uid, "email": user.email or email, "display_name": user.display_name or ""}
+
+
+def set_account_password(uid: str, password: str) -> None:
+    auth.update_user(uid, password=password, app=get_firebase_app())
+
+
+def set_account_name(uid: str, display_name: str) -> None:
+    auth.update_user(uid, display_name=display_name or None, app=get_firebase_app())

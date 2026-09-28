@@ -22,6 +22,8 @@ def add_member(db: Client, access: BusinessAccess, member_in: MemberAddIn) -> Me
     access.require(Permission.MANAGE_MEMBERS)
     if member_in.role == MemberRole.OWNER:
         raise bad_request("A business has only one owner")
+    if member_in.role == MemberRole.SELLER:
+        raise bad_request("Create seller accounts on the Sellers tab")
 
     account = find_user_by_email(member_in.email)
     if account is None:
@@ -60,6 +62,8 @@ def update_member(db: Client, access: BusinessAccess, user_id: str, member_in: M
 
     if member.role == MemberRole.OWNER or member_in.role == MemberRole.OWNER:
         raise bad_request("The owner role cannot be given or changed")
+    if member.role == MemberRole.SELLER or member_in.role == MemberRole.SELLER:
+        raise bad_request("Seller accounts are managed on the Sellers tab")
     if user_id == access.user.uid:
         raise bad_request("You cannot change your own role")
 
@@ -88,7 +92,10 @@ def remove_member(db: Client, access: BusinessAccess, user_id: str) -> None:
 
     batch = db.batch()
     batch.delete(members_collection(db, access.business_id).document(user_id))
-    batch.update(business_document(db, access.business_id), {"memberUids": ArrayRemove([user_id])})
+    batch.update(
+        business_document(db, access.business_id),
+        {"memberUids": ArrayRemove([user_id]), "sellerUids": ArrayRemove([user_id])},
+    )
     batch.commit()
     _clear_cache(access.business_id, user_id)
 

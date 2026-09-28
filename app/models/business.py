@@ -15,6 +15,9 @@ class Business(BusinessIn, FirestoreModel):
     owner_uid: str = ""
     # User ids of the ACTIVE members. Lets us find "my businesses" with one query.
     member_uids: list[str] = []
+    # User ids of the ACTIVE seller accounts (selling app only). Kept apart from member_uids, so the
+    # business does not show up in a seller's "my businesses" list in the main app.
+    seller_uids: list[str] = []
     verification_status: VerificationStatus = VerificationStatus.UNVERIFIED
     verification_level: VerificationType | None = None
     # Copied from other documents so the directory can filter without extra reads:

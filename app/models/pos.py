@@ -1,0 +1,46 @@
+from google.cloud.firestore import Client, CollectionReference
+
+from app.models.base import FirestoreModel
+from app.models.business import business_subcollection
+from app.schemas.base import CamelModel
+from app.schemas.enums import PosPaymentType, ReceiptStatus
+
+# Firestore location:  businesses/{businessId}/receipts/{receiptId}
+#
+# One receipt per checkout in the selling app. Each line is also saved as a Sale
+# (businesses/{businessId}/sales), so the main app's sales and dashboard include it.
+
+
+class ReceiptLine(CamelModel):
+    product_id: str
+    variant_id: str | None = None
+    product_name: str
+    variant_name: str = ""
+    unit: str = ""
+    quantity: int
+    unit_price: float
+    line_total: float
+    sale_id: str  # the Sale saved for this line
+
+
+class Receipt(FirestoreModel):
+    receipt_number: str  # short and readable, e.g. 20260928-K3F9QX
+    date: str  # YYYY-MM-DD, the seller's local date
+    location_id: str
+    location_name: str = ""
+    items: list[ReceiptLine]
+    total: float
+    amount_paid: float
+    change_given: float  # amount_paid - total
+    payment_method: PosPaymentType
+    note: str = ""
+    status: ReceiptStatus = ReceiptStatus.COMPLETED
+    seller_uid: str
+    seller_name: str = ""
+    voided_at: int | None = None
+    voided_by_name: str = ""
+    void_reason: str = ""
+
+
+def receipts_collection(db: Client, business_id: str) -> CollectionReference:
+    return business_subcollection(db, business_id, "receipts")

@@ -17,6 +17,7 @@ from app.routes import (
     network_routes,
     order_routes,
     profile_routes,
+    pos_routes,
     upload_routes,
 )
 
@@ -80,6 +81,7 @@ for router_module in (
     commerce_routes,
     order_routes,
     network_routes,
+    pos_routes,
     upload_routes,
     admin_routes,
 ):

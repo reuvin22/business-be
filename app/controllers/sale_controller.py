@@ -83,6 +83,8 @@ def _undo(transaction: Transaction, db: Client, access: BusinessAccess, sale_ref
     if not sale_snapshot.exists:
         raise not_found("Sale")
     sale = Sale.from_snapshot(sale_snapshot)
+    if sale.receipt_id:
+        raise bad_request(f"This sale is on receipt {sale.receipt_number}. Void the receipt in the selling app instead.")
 
     stock_ref = inventory_document(db, business_id, sale.product_id, sale.variant_id, sale.location_id)
     stock_snapshot = stock_ref.get(transaction=transaction)

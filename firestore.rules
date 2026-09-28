@@ -1,11 +1,38 @@
 rules_version = '2';
 
-// The frontend never talks to Firestore directly; it goes through this API.
-// The API uses the Admin SDK, which ignores these rules, so all browser access can be blocked.
+// All writes go through the API. The API uses the Admin SDK, which ignores these rules.
+//
+// The browser may only READ, live, the few things that must update in real time:
+// stock levels and products. The main app and the selling app (my-business-pos) listen to
+// them, so a sale at the counter shows up on the owner's screen right away, and the other way round.
 service cloud.firestore {
   match /databases/{database}/documents {
     match /{document=**} {
       allow read, write: if false;
+    }
+
+    match /businesses/{businessId} {
+      function memberPath() {
+        return /databases/$(database)/documents/businesses/$(businessId)/members/$(request.auth.uid);
+      }
+
+      function isActiveMember() {
+        return request.auth != null && exists(memberPath()) && get(memberPath()).data.status == 'ACTIVE';
+      }
+
+      // A seller given a store (locationId) only sees that store's stock
+      function canSeeLocation(locationId) {
+        let member = get(memberPath()).data;
+        return member.get('locationId', null) == null || member.locationId == locationId;
+      }
+
+      match /inventory/{inventoryId} {
+        allow read: if isActiveMember() && canSeeLocation(resource.data.locationId);
+      }
+
+      match /products/{productId} {
+        allow read: if isActiveMember();
+      }
     }
   }
 }
