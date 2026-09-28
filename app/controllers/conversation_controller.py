@@ -1,5 +1,6 @@
 """Messages between two businesses (section 26)."""
 
+from google.cloud import firestore
 from google.cloud.firestore import Client, FieldFilter
 
 from app.controllers import crud
@@ -29,7 +30,8 @@ def to_view(conversation: Conversation, my_business_id: str) -> ConversationView
 def list_conversations(db: Client, access: BusinessAccess) -> list[ConversationView]:
     def read() -> list[Conversation]:
         query = conversations_collection(db).where(filter=FieldFilter("businessIds", "array_contains", access.business_id))
-        return [Conversation.from_snapshot(snapshot) for snapshot in query.stream()]
+        latest_first = query.order_by("lastMessageAt", direction=firestore.Query.DESCENDING)
+        return [Conversation.from_snapshot(snapshot) for snapshot in crud.stream_indexed(latest_first, fallback=query)]
 
     conversations = cache.cached_models(cache.business_scope(access.business_id), "conversations", Conversation, read)
     conversations.sort(key=lambda c: c.last_message_at, reverse=True)

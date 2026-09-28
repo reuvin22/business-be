@@ -92,3 +92,32 @@ def test_all_variants_in_one_request(client):
 
     variants = client.get(f"/api/v1/businesses/{business_id}/variants").json()
     assert sorted(v["variantName"] for v in variants) == ["1.5L", "290ml"]
+
+
+def test_a_sale_keeps_the_catalog_cached_but_refreshes_stock(client, firestore_db):
+    business_id = create_business(client)["id"]
+    product_id, location_id = create_product_with_stock(client, business_id, stock=100)
+    products_url = f"/api/v1/businesses/{business_id}/products"
+    assert [p["productName"] for p in client.get(products_url).json()] == ["Cola 1.5L"]  # now cached
+
+    # Rename the product behind the API's back, then sell: the product list stays cached...
+    firestore_db.collection("businesses").document(business_id).collection("products").document(product_id).update(
+        {"productName": "Renamed"}
+    )
+    client.post(
+        f"/api/v1/businesses/{business_id}/sales",
+        json={"productId": product_id, "locationId": location_id, "quantity": 3, "unitPrice": 130, "date": "2026-09-28"},
+    )
+    assert [p["productName"] for p in client.get(products_url).json()] == ["Cola 1.5L"]
+    # ...while the stock is fresh
+    assert client.get(f"/api/v1/businesses/{business_id}/inventory").json()[0]["quantity"] == 97
+
+    # A change to the business itself refreshes everything, stock included
+    client.post(f"/api/v1/businesses/{business_id}/brands", json={"brandName": "Fizzy"})
+    assert [p["productName"] for p in client.get(products_url).json()] == ["Renamed"]
+
+
+def test_cache_status(client_without_db):
+    status = client_without_db.get("/api/health/cache").json()
+    assert status["status"] == "ok"
+    assert status["ttlSeconds"] == 86400

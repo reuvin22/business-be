@@ -10,13 +10,17 @@ How it works ("cache-aside" with version numbers):
 Scopes (what one version number covers):
     business:{id}   everything under businesses/{id}, plus that business's orders,
                     relationships, conversations, and verification requests
+    business:{id}:stock   only the stock side of a business: inventory, stock history,
+                    sales, and receipts. A sale bumps just this, so the cached products,
+                    prices, profile... stay. Bumping business:{id} also bumps its stock scope.
     user:{uid}      the list of businesses a user belongs to
     conversation:{id}  one conversation and its messages
     directory       directory search results
     categories      the shared category tree
     admin           admin-only lists
 
-Writes to /api/v1/businesses/{id}/... bump business:{id} automatically (middleware in main.py).
+Writes to /api/v1/businesses/{id}/... bump business:{id} automatically (middleware in main.py);
+stock-only writes (inventory, sales, the selling app) bump just business:{id}:stock.
 Writes that also affect ANOTHER business (e.g. an order changes both buyer and seller)
 bump that business in the controller.
 
@@ -51,6 +55,7 @@ M = TypeVar("M", bound=BaseModel)
 _client: redis.Redis | None = None
 _offline_until = 0.0  # time.monotonic() value; while in the future, Redis is skipped
 _was_offline = False
+_last_error = ""
 
 
 def get_client() -> redis.Redis | None:
@@ -99,9 +104,10 @@ def _usable_client() -> redis.Redis | None:
 
 
 def _pause(error: Exception) -> None:
-    global _offline_until, _was_offline
+    global _offline_until, _was_offline, _last_error
     _offline_until = time.monotonic() + OFFLINE_PAUSE_SECONDS
     _was_offline = True
+    _last_error = f"{time.strftime('%Y-%m-%d %H:%M:%S')} {type(error).__name__}: {error}"
     logger.warning("Redis is not reachable (%s). Using Firestore only for %s seconds.", error, OFFLINE_PAUSE_SECONDS)
 
 
@@ -110,6 +116,15 @@ def _pause(error: Exception) -> None:
 
 def business_scope(business_id: str) -> str:
     return f"business:{business_id}"
+
+
+def stock_scope(business_id: str) -> str:
+    """The stock side of a business (see STOCK_COLLECTIONS)."""
+    return f"business:{business_id}:stock"
+
+
+# Collections under businesses/{id} that change with every sale or delivery
+STOCK_COLLECTIONS = {"inventory", "stockMovements", "sales", "receipts"}
 
 
 def user_scope(uid: str) -> str:
@@ -128,6 +143,8 @@ def collection_path(collection) -> str:
 def scope_for_path(path: str) -> str:
     """The scope of a Firestore path, e.g. "businesses/abc/products" -> "business:abc"."""
     parts = path.split("/")
+    if parts[0] == "businesses" and len(parts) >= 3 and parts[2] in STOCK_COLLECTIONS:
+        return stock_scope(parts[1])
     if parts[0] == "businesses" and len(parts) >= 2:
         return business_scope(parts[1])
     if parts[0] == "conversations" and len(parts) >= 2:
@@ -152,9 +169,14 @@ def bump(*scopes: str) -> None:
     client = _usable_client()
     if client is None or not scopes:
         return
+    # A change to a whole business may change its stock too (e.g. shipping an order, deleting a product)
+    everything = set(scopes)
+    for scope in scopes:
+        if scope.startswith("business:") and not scope.endswith(":stock"):
+            everything.add(f"{scope}:stock")
     try:
         pipe = client.pipeline(transaction=False)
-        for scope in set(scopes):
+        for scope in everything:
             pipe.incr(_version_key(scope))
         pipe.execute()
     except redis.RedisError as error:
@@ -213,3 +235,26 @@ def cached_models(scope: str, key: str, model_class: type[M], load: Callable[[],
         to_json=lambda models: [model.model_dump(mode="json", by_alias=True) for model in models],
         from_json=lambda data: [model_class.model_validate(item) for item in data],
     )
+
+
+# ---- Status (GET /api/health/cache) ---------------------------------------------------------
+
+
+def status() -> dict:
+    """Whether the cache is on and working, for checking a deployed server."""
+    client = get_client()
+    if client is None:
+        return {"status": "off", "detail": "REDIS_URL is not set, so every read goes to Firestore."}
+    report = {
+        "ttlSeconds": settings.cache_ttl_seconds,
+        "pausedForSeconds": max(0, round(_offline_until - time.monotonic())),
+        "lastError": _last_error or None,
+    }
+    try:
+        start = time.perf_counter()
+        client.ping()
+        report["pingMs"] = round((time.perf_counter() - start) * 1000)
+        report["keys"] = client.dbsize()
+    except redis.RedisError as error:
+        return {"status": "error", "detail": f"{type(error).__name__}: {error}", **report}
+    return {"status": "ok", **report}

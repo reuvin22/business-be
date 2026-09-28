@@ -1,5 +1,6 @@
 from google.cloud.firestore import Client, FieldFilter
 
+from app.controllers import crud
 from app.controllers.crud import forbidden
 from app.core import cache
 from app.core.permissions import ALL_PERMISSIONS
@@ -17,8 +18,9 @@ def list_my_businesses(db: Client, user: CurrentUser) -> list[Business]:
     """Businesses where the user is an active member."""
 
     def read() -> list[Business]:
-        query = businesses_collection(db).where(filter=FieldFilter("memberUids", "array_contains", user.uid))
-        businesses = [Business.from_snapshot(snapshot) for snapshot in query.stream()]
+        mine = businesses_collection(db).where(filter=FieldFilter("memberUids", "array_contains", user.uid))
+        snapshots = crud.stream_indexed(mine.order_by("createdAt"), fallback=mine)
+        businesses = [Business.from_snapshot(snapshot) for snapshot in snapshots]
         return sorted(businesses, key=lambda business: business.created_at)
 
     return cache.cached_models(cache.user_scope(user.uid), "businesses", Business, read)

@@ -23,7 +23,9 @@ class Settings(BaseSettings):
     # Put the API server in the same region as Redis, or cache calls cross the ocean too.
     redis_url: str = ""
     # Cached data expires after this many seconds, even if nothing changed (a safety net).
-    cache_ttl_seconds: int = 600
+    # How long a cached entry lives. Changes already mark old entries as outdated, so this only
+    # decides how long data stays cached while nothing changes (default: 1 day).
+    cache_ttl_seconds: int = 86400
 
     # Cloudflare R2 (file storage for uploaded images). Find these in the Cloudflare dashboard:
     #   R2 > your bucket > Settings (public URL), and R2 > Manage API tokens (keys).

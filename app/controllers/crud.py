@@ -8,13 +8,19 @@ Reads that happen right before a write skip the cache, so an update always start
 the latest data in Firestore.
 """
 
+import logging
+
 from fastapi import HTTPException, status
-from google.cloud.firestore import CollectionReference, DocumentReference
+from google.api_core.exceptions import FailedPrecondition
+from google.cloud.firestore import CollectionReference, DocumentReference, DocumentSnapshot, Query
 from pydantic import BaseModel
 
 from app.core import cache
 from app.models.base import FirestoreModel
 from app.utils.helpers import current_time_ms
+
+
+logger = logging.getLogger(__name__)
 
 
 def not_found(what: str) -> HTTPException:
@@ -81,6 +87,19 @@ def read_fresh(doc_ref: DocumentReference, model_class: type[FirestoreModel]) ->
     None when it does not exist."""
     snapshot = doc_ref.get()
     return model_class.from_snapshot(snapshot) if snapshot.exists else None
+
+
+def stream_indexed(query: Query, fallback: Query) -> list[DocumentSnapshot]:
+    """Runs a query that needs a composite index (see firestore.indexes.json).
+
+    Until that index is deployed and built, Firestore refuses the query. Then `fallback` (a simpler
+    query that needs no composite index; the caller still sorts/filters in Python) runs instead,
+    so the page keeps working, and the server log says to deploy the indexes."""
+    try:
+        return list(query.stream())
+    except FailedPrecondition as error:
+        logger.warning("Firestore index missing, using a slower query. Deploy firestore.indexes.json. %s", error)
+        return list(fallback.stream())
 
 
 # ---- Writing (marks the cache as outdated) -----------------------------------------------

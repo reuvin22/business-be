@@ -114,17 +114,19 @@ def list_movements(
     """The stock history, newest first. Filter by product and/or location."""
 
     def read() -> list[StockMovement]:
-        collection = stock_movements_collection(db, business_id)
+        query = stock_movements_collection(db, business_id)
         if product_id:
-            query = collection.where(filter=FieldFilter("productId", "==", product_id))
-        elif location_id:
-            query = collection.where(filter=FieldFilter("locationId", "==", location_id))
-        else:
-            query = collection.order_by("createdAt", direction=firestore.Query.DESCENDING).limit(limit)
-        return [StockMovement.from_snapshot(snapshot) for snapshot in query.stream()]
+            query = query.where(filter=FieldFilter("productId", "==", product_id))
+        if location_id:
+            query = query.where(filter=FieldFilter("locationId", "==", location_id))
+        # Firestore sorts and returns only the newest `limit` lines (index: filters + createdAt)
+        newest = query.order_by("createdAt", direction=firestore.Query.DESCENDING).limit(limit)
+        if not product_id and not location_id:
+            return [StockMovement.from_snapshot(snapshot) for snapshot in newest.stream()]
+        return [StockMovement.from_snapshot(snapshot) for snapshot in crud.stream_indexed(newest, fallback=query)]
 
     movements = cache.cached_models(
-        cache.business_scope(business_id), f"movements:{product_id}:{location_id}:{limit}", StockMovement, read
+        cache.stock_scope(business_id), f"movements:{product_id}:{location_id}:{limit}", StockMovement, read
     )
     if location_id:
         movements = [m for m in movements if m.location_id == location_id]

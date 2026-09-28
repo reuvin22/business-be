@@ -4,8 +4,10 @@ A business submits a request with documents. A platform admin reviews it and set
 Only claim what was actually checked: see VerificationType in app/schemas/enums.py.
 """
 
+from google.cloud import firestore
 from google.cloud.firestore import Client, FieldFilter
 
+from app.controllers import crud
 from app.controllers.crud import bad_request, not_found
 from app.core import cache
 from app.controllers.trust_controller import set_document_status
@@ -23,7 +25,8 @@ from app.utils.helpers import current_time_ms
 def list_requests_for_business(db: Client, business_id: str) -> list[VerificationRequest]:
     def read() -> list[VerificationRequest]:
         query = verification_requests_collection(db).where(filter=FieldFilter("businessId", "==", business_id))
-        requests = [VerificationRequest.from_snapshot(snapshot) for snapshot in query.stream()]
+        newest_first = query.order_by("submittedAt", direction=firestore.Query.DESCENDING)
+        requests = [VerificationRequest.from_snapshot(s) for s in crud.stream_indexed(newest_first, fallback=query)]
         return sorted(requests, key=lambda r: r.submitted_at, reverse=True)
 
     return cache.cached_models(cache.business_scope(business_id), "verifications", VerificationRequest, read)
@@ -67,7 +70,8 @@ def list_all_requests(db: Client, status: VerificationStatus | None = None) -> l
     def read() -> list[VerificationRequest]:
         collection = verification_requests_collection(db)
         query = collection.where(filter=FieldFilter("status", "==", status.value)) if status else collection
-        requests = [VerificationRequest.from_snapshot(snapshot) for snapshot in query.stream()]
+        newest_first = query.order_by("submittedAt", direction=firestore.Query.DESCENDING)
+        requests = [VerificationRequest.from_snapshot(s) for s in crud.stream_indexed(newest_first, fallback=query)]
         return sorted(requests, key=lambda r: r.submitted_at, reverse=True)
 
     return cache.cached_models(cache.ADMIN, f"verifications:{status or 'all'}", VerificationRequest, read)

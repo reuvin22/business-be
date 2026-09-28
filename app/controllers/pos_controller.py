@@ -374,9 +374,13 @@ def list_receipts(db: Client, access: BusinessAccess, date: datetime.date, locat
 
     def read() -> list[Receipt]:
         query = receipts_collection(db, access.business_id).where(filter=FieldFilter("date", "==", date.isoformat()))
-        return [Receipt.from_snapshot(snapshot) for snapshot in query.stream()]
+        if location_id:
+            query = query.where(filter=FieldFilter("locationId", "==", location_id))
+        newest_first = query.order_by("createdAt", direction=firestore.Query.DESCENDING)
+        return [Receipt.from_snapshot(snapshot) for snapshot in crud.stream_indexed(newest_first, fallback=query)]
 
-    receipts = cache.cached_models(cache.business_scope(access.business_id), f"receipts:{date}", Receipt, read)
+    key = f"receipts:{date}:{location_id}"
+    receipts = cache.cached_models(cache.stock_scope(access.business_id), key, Receipt, read)
     if access.member.role == MemberRole.SELLER:
         receipts = [r for r in receipts if r.seller_uid == access.user.uid]
     if location_id:

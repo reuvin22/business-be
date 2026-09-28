@@ -42,6 +42,8 @@ app.add_middleware(
 # business (and the directory) is marked outdated. See app/core/cache.py for how this works.
 BUSINESS_URL = re.compile(r"^/api/v1/businesses/([^/]+)")
 READ_ONLY_POSTS = ("/orders/quote",)  # POSTs that don't change anything
+# Writes that only change stock (stock records, walk-in sales, the selling app)
+STOCK_ONLY_URL = re.compile(r"^/api/v1/businesses/[^/]+/(inventory|sales|pos)(/|$)")
 
 
 @app.middleware("http")
@@ -50,7 +52,10 @@ async def clear_cache_after_changes(request: Request, call_next):
     is_change = request.method in ("POST", "PUT", "PATCH", "DELETE") and response.status_code < 400
     if is_change and not request.url.path.endswith(READ_ONLY_POSTS):
         match = BUSINESS_URL.match(request.url.path)
-        if match:
+        if match and STOCK_ONLY_URL.match(request.url.path):
+            # A sale or stock change: only the stock side is outdated (products, profile... stay cached)
+            cache.bump(cache.stock_scope(match.group(1)))
+        elif match:
             cache.bump(cache.business_scope(match.group(1)), cache.DIRECTORY)
     return response
 
@@ -59,6 +64,12 @@ async def clear_cache_after_changes(request: Request, call_next):
 @app.get("/api/health", tags=["Health"])
 def health_check():
     return {"status": "ok"}
+
+
+@app.get("/api/health/cache", tags=["Health"])
+def cache_check():
+    """Open this in a browser after deploying: is Redis connected, how fast, and how many keys it holds."""
+    return cache.status()
 
 
 @app.get("/api/health/firebase", tags=["Health"])

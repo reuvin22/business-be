@@ -165,20 +165,31 @@ a public profile took about 2,000 ms from Firestore and about 70 ms from the cac
   `/api/v1/businesses/{id}/...` bumps that business's version (middleware in `app/main.py`), so the
   next read loads fresh data. Changes that affect another business too (orders, reviews, relationships,
   messages) bump both businesses in their controller.
+- **Stock has its own version** (`business:{id}:stock`: inventory, stock history, sales, receipts). A sale,
+  a stock change, or anything in the selling app bumps only that, so products, prices, the profile, and the
+  rest stay cached through a busy day of selling.
+- **Check it on the live server:** open `/api/health/cache`. It shows whether Redis is connected, how fast
+  it answers (`pingMs`), how many keys it holds, and the last Redis error, if any.
 - **If you add a new write** that does not go through `/api/v1/businesses/{id}/...` or the `crud` helpers,
   call `cache.bump(...)` for every business it changes.
 - **If Redis is down** the API keeps working: it skips Redis for 30 seconds at a time and reads Firestore.
   When Redis comes back, everything cached before the outage is thrown away.
-- Set `REDIS_URL` to turn it on (empty = no cache). `CACHE_TTL_SECONDS` (default 600) is a safety net:
-  entries expire even if nothing changed.
+- Set `REDIS_URL` to turn it on (empty = no cache). `CACHE_TTL_SECONDS` (default 86400 = 1 day) is how long data stays cached while nothing changes.
 - The frontend also remembers GET responses for 30 seconds and forgets them after any change.
 
 ### Indexes and how data is split up
-- Every query filters on **one field** (for example `memberUids`, `businessIds`, `visibility`), which Firestore
-  indexes automatically, so no composite indexes are needed.
-- `firestore.indexes.json` turns **off** indexing for big fields that are never searched (descriptions,
-  images, message text, order items). That makes writes faster and cheaper. Deploy it with
-  `npx firebase-tools deploy --only firestore:indexes --project <your-project-id>`.
+- Lists are **filtered, sorted, and limited by Firestore**, not in Python, using the composite indexes in
+  `firestore.indexes.json`. For example: my businesses (`memberUids` + `createdAt`), orders per side
+  (`sellerBusinessId` + `orderedAt`), conversations (`businessIds` + `lastMessageAt`), stock history
+  (`productId` / `locationId` + `createdAt`, only the newest lines are read), receipts (`date` + `locationId` + `createdAt`).
+- `firestore.indexes.json` also turns **off** indexing for big fields that are never searched (descriptions,
+  images, message text, order and receipt items). That makes writes faster and cheaper.
+- **Deploy the indexes** whenever that file changes (they take a few minutes to build; see Firebase Console →
+  Firestore → Indexes): `npx firebase-tools deploy --only firestore:indexes --project <your-project-id>`.
+  Until an index is ready, its query falls back to a slower one (`crud.stream_indexed`) and the server log
+  says "Firestore index missing", so nothing breaks in the meantime.
+- **Adding a query** that filters on one field and sorts on another (or filters on two fields)? Add its index to
+  `firestore.indexes.json` and read it with `crud.stream_indexed(query, fallback=simpler_query)`.
 - Data is already **partitioned by business**: each business's products, stock, contacts, and so on live
   under `businesses/{id}/...`, so one busy business never slows down another.
 - Independent reads run **at the same time** (`app/utils/parallel.py`), e.g. the 11 parts of a public profile.

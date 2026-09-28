@@ -1,25 +1,315 @@
 {
-  "indexes": [],
+  "indexes": [
+    {
+      "collectionGroup": "businesses",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "memberUids",
+          "arrayConfig": "CONTAINS"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "products",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "visibility",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "orders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "businessIds",
+          "arrayConfig": "CONTAINS"
+        },
+        {
+          "fieldPath": "orderedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "orders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "buyerBusinessId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "orderedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "orders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "sellerBusinessId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "orderedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "conversations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "businessIds",
+          "arrayConfig": "CONTAINS"
+        },
+        {
+          "fieldPath": "lastMessageAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "relationships",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "businessIds",
+          "arrayConfig": "CONTAINS"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "verificationRequests",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "businessId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "submittedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "verificationRequests",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "submittedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "stockMovements",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "productId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "stockMovements",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "locationId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "stockMovements",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "productId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "locationId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "receipts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "date",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "receipts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "date",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "locationId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
+      ]
+    }
+  ],
   "fieldOverrides": [
-    { "collectionGroup": "businesses", "fieldPath": "businessDescription", "indexes": [] },
-    { "collectionGroup": "businesses", "fieldPath": "businessLogo", "indexes": [] },
-    { "collectionGroup": "businesses", "fieldPath": "coverImage", "indexes": [] },
-    { "collectionGroup": "products", "fieldPath": "description", "indexes": [] },
-    { "collectionGroup": "products", "fieldPath": "specifications", "indexes": [] },
-    { "collectionGroup": "products", "fieldPath": "images", "indexes": [] },
-    { "collectionGroup": "products", "fieldPath": "orderRules", "indexes": [] },
-    { "collectionGroup": "variants", "fieldPath": "attributes", "indexes": [] },
-    { "collectionGroup": "locations", "fieldPath": "operatingHours", "indexes": [] },
-    { "collectionGroup": "orders", "fieldPath": "items", "indexes": [] },
-    { "collectionGroup": "orders", "fieldPath": "shippingAddress", "indexes": [] },
-    { "collectionGroup": "orders", "fieldPath": "notes", "indexes": [] },
-    { "collectionGroup": "conversations", "fieldPath": "lastMessage", "indexes": [] },
-    { "collectionGroup": "conversations", "fieldPath": "businessNames", "indexes": [] },
-    { "collectionGroup": "conversations", "fieldPath": "lastReadAt", "indexes": [] },
-    { "collectionGroup": "messages", "fieldPath": "message", "indexes": [] },
-    { "collectionGroup": "messages", "fieldPath": "attachments", "indexes": [] },
-    { "collectionGroup": "reviews", "fieldPath": "review", "indexes": [] },
-    { "collectionGroup": "reviews", "fieldPath": "response", "indexes": [] },
-    { "collectionGroup": "reviews", "fieldPath": "ratings", "indexes": [] }
+    {
+      "collectionGroup": "businesses",
+      "fieldPath": "businessDescription",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "businesses",
+      "fieldPath": "businessLogo",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "businesses",
+      "fieldPath": "coverImage",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "products",
+      "fieldPath": "description",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "products",
+      "fieldPath": "specifications",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "products",
+      "fieldPath": "images",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "products",
+      "fieldPath": "orderRules",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "variants",
+      "fieldPath": "attributes",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "locations",
+      "fieldPath": "operatingHours",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "orders",
+      "fieldPath": "items",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "orders",
+      "fieldPath": "shippingAddress",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "orders",
+      "fieldPath": "notes",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "conversations",
+      "fieldPath": "lastMessage",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "conversations",
+      "fieldPath": "businessNames",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "conversations",
+      "fieldPath": "lastReadAt",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "messages",
+      "fieldPath": "message",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "messages",
+      "fieldPath": "attachments",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "reviews",
+      "fieldPath": "review",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "reviews",
+      "fieldPath": "response",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "reviews",
+      "fieldPath": "ratings",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "receipts",
+      "fieldPath": "items",
+      "indexes": []
+    }
   ]
 }

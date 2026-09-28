@@ -3,8 +3,10 @@
 One business asks, the other accepts or declines. Either side can end it later.
 """
 
+from google.cloud import firestore
 from google.cloud.firestore import Client, FieldFilter
 
+from app.controllers import crud
 from app.controllers.business_controller import find_business
 from app.controllers.crud import bad_request, not_found
 from app.core import cache
@@ -46,7 +48,8 @@ def to_view(relationship: Relationship, my_business_id: str) -> RelationshipView
 def _all_for(db: Client, business_id: str) -> list[Relationship]:
     def read() -> list[Relationship]:
         query = relationships_collection(db).where(filter=FieldFilter("businessIds", "array_contains", business_id))
-        relationships = [Relationship.from_snapshot(snapshot) for snapshot in query.stream()]
+        newest_first = query.order_by("createdAt", direction=firestore.Query.DESCENDING)
+        relationships = [Relationship.from_snapshot(s) for s in crud.stream_indexed(newest_first, fallback=query)]
         return sorted(relationships, key=lambda r: r.created_at, reverse=True)
 
     return cache.cached_models(cache.business_scope(business_id), "relationships", Relationship, read)

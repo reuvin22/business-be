@@ -4,7 +4,7 @@ import datetime
 
 from google.cloud.firestore import Client, FieldFilter
 
-from app.controllers import settings_controller
+from app.controllers import crud, settings_controller
 from app.controllers.brand_controller import list_brands
 from app.controllers.contact_controller import list_contacts
 from app.controllers.crud import forbidden, not_found
@@ -160,8 +160,9 @@ def _build_public_products(
     _get_active_business(db, business_id)
     customer_prices = list_prices_for_customer(db, business_id, buyer_business_id) if buyer_business_id else []
 
-    query = products_collection(db, business_id).where(filter=FieldFilter("visibility", "==", Visibility.PUBLIC.value))
-    products = [Product.from_snapshot(s) for s in query.stream()]
+    public = products_collection(db, business_id).where(filter=FieldFilter("visibility", "==", Visibility.PUBLIC.value))
+    public_and_active = public.where(filter=FieldFilter("status", "==", ProductStatus.ACTIVE.value))
+    products = [Product.from_snapshot(s) for s in crud.stream_indexed(public_and_active, fallback=public)]
     products = sorted((p for p in products if p.status == ProductStatus.ACTIVE), key=lambda p: p.product_name.lower())
 
     # Variants and prices of every product are read at the same time, not one product after another

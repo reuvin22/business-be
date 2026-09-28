@@ -211,11 +211,19 @@ def _clear_cache(order: Order) -> None:
 def list_orders(db: Client, access: BusinessAccess, side: str | None = None) -> list[Order]:
     """Orders this business is part of, newest first. side = "buying", "selling", or None for both."""
 
-    def read() -> list[Order]:
-        query = orders_collection(db).where(filter=FieldFilter("businessIds", "array_contains", access.business_id))
-        return [Order.from_snapshot(snapshot) for snapshot in query.stream()]
+    # Each side has its own query (and index), so Firestore only returns the orders asked for
+    field = {"buying": "buyerBusinessId", "selling": "sellerBusinessId"}.get(side or "")
 
-    orders = cache.cached_models(cache.business_scope(access.business_id), "orders", Order, read)
+    def read() -> list[Order]:
+        orders = orders_collection(db)
+        if field:
+            query = orders.where(filter=FieldFilter(field, "==", access.business_id))
+        else:
+            query = orders.where(filter=FieldFilter("businessIds", "array_contains", access.business_id))
+        newest_first = query.order_by("orderedAt", direction=firestore.Query.DESCENDING)
+        return [Order.from_snapshot(snapshot) for snapshot in crud.stream_indexed(newest_first, fallback=query)]
+
+    orders = cache.cached_models(cache.business_scope(access.business_id), f"orders:{field}", Order, read)
     if side == "buying":
         orders = [o for o in orders if o.buyer_business_id == access.business_id]
     elif side == "selling":
