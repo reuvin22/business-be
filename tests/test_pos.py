@@ -82,8 +82,11 @@ def test_checkout_totals_and_takes_stock_out(client, shop):
     assert sale["receiptNumber"] == receipt["receiptNumber"]
     movement = client.get(f"/api/v1/businesses/{business_id}/stock-movements").json()[0]
     assert (movement["movementType"], movement["change"], movement["byName"]) == ("SALE", -5, "seller")
-    # A sale from a receipt is undone by voiding the receipt, not from the main app
-    assert client.delete(f"/api/v1/businesses/{business_id}/sales/{sale['id']}").status_code == 400
+    # Deleting it in the main app deletes the whole receipt and puts the stock back
+    assert client.delete(f"/api/v1/businesses/{business_id}/sales/{sale['id']}").status_code == 204
+    assert client.get(f"/api/v1/businesses/{business_id}/sales").json() == []
+    assert client.get(f"/api/v1/businesses/{business_id}/pos/receipts", params={"date": TODAY}).json() == []
+    assert stock_quantity(client, shop) == 100
 
 
 def test_void_puts_stock_back(client, shop):
@@ -176,3 +179,15 @@ def test_counter_prices_like_a_shop(client, shop):
     })
     assert response.status_code == 201, response.text
     assert response.json()["total"] == 1800
+
+
+def test_deleting_a_voided_receipt_keeps_stock(client, shop):
+    login_as("seller@test.com")
+    receipt = checkout(client, shop, 5).json()
+    base = f"/api/v1/businesses/{shop['business_id']}/pos/receipts/{receipt['id']}"
+    client.post(f"{base}/void", json={"reason": "Wrong item"})
+    assert client.delete(base).status_code == 403  # sellers cannot delete receipts
+
+    login_as("owner@test.com")
+    assert client.delete(base).status_code == 204
+    assert stock_quantity(client, shop) == 100  # put back once (by the void), not twice

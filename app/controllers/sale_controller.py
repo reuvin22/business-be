@@ -3,7 +3,7 @@
 from google.cloud import firestore
 from google.cloud.firestore import Client, DocumentReference, Transaction
 
-from app.controllers import crud
+from app.controllers import crud, pos_controller
 from app.controllers.crud import bad_request, not_found
 from app.controllers.inventory_controller import StockNames, calculate_stock, location_name, new_movement, stock_names
 from app.controllers.product_controller import get_product, get_variant
@@ -70,9 +70,16 @@ def _record(
 
 
 def delete_sale(db: Client, access: BusinessAccess, sale_id: str) -> None:
-    """Removes a sale and puts the quantity back into stock (if the stock record still exists)."""
+    """Deletes a sale and puts the quantity back into stock (if the stock record still exists).
+
+    A sale from the selling app is one line of a receipt, so its whole receipt is deleted
+    (every line, with its stock put back); otherwise the receipt's total would be wrong."""
     access.require(Permission.MANAGE_INVENTORY)
     sale_ref = sales_collection(db, access.business_id).document(sale_id)
+    sale = crud.read_fresh(sale_ref, Sale)
+    if sale is not None and sale.receipt_id:
+        pos_controller.delete_receipt(db, access, sale.receipt_id)
+        return
     _undo(db.transaction(), db, access, sale_ref)
 
 
@@ -83,8 +90,6 @@ def _undo(transaction: Transaction, db: Client, access: BusinessAccess, sale_ref
     if not sale_snapshot.exists:
         raise not_found("Sale")
     sale = Sale.from_snapshot(sale_snapshot)
-    if sale.receipt_id:
-        raise bad_request(f"This sale is on receipt {sale.receipt_number}. Void the receipt in the selling app instead.")
 
     stock_ref = inventory_document(db, business_id, sale.product_id, sale.variant_id, sale.location_id)
     stock_snapshot = stock_ref.get(transaction=transaction)

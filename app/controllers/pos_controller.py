@@ -396,11 +396,7 @@ def void_receipt(db: Client, access: BusinessAccess, receipt_id: str, void_in: V
         if current_time_ms() - receipt.created_at > SELLER_VOID_WINDOW_MS:
             raise forbidden("This receipt is more than a day old. Ask a manager to void it.")
 
-    stock_refs = [
-        inventory_document(db, access.business_id, line.product_id, line.variant_id, receipt.location_id)
-        for line in receipt.items
-    ]
-    return _void(db.transaction(), db, access, receipt_ref, stock_refs, void_in)
+    return _void(db.transaction(), db, access, receipt_ref, _stock_refs(db, access, receipt), void_in)
 
 
 @firestore.transactional
@@ -415,6 +411,64 @@ def _void(
     receipt = Receipt.from_snapshot(receipt_ref.get(transaction=transaction))
     if receipt.status == ReceiptStatus.VOIDED:
         raise bad_request("This receipt is already voided")
+    _put_stock_back(transaction, db, access, receipt, stock_refs, note=void_in.reason)
+
+    now = current_time_ms()
+    receipt.status = ReceiptStatus.VOIDED
+    receipt.voided_at = now
+    receipt.voided_by_name = _seller_name(access)
+    receipt.void_reason = void_in.reason
+    receipt.updated_at = now
+    transaction.set(receipt_ref, receipt.to_firestore())
+    return receipt
+
+
+def delete_receipt(db: Client, access: BusinessAccess, receipt_id: str) -> None:
+    """Deletes a receipt and its sales from the system, and puts the stock back (a voided receipt
+    already did that). Managers only. The stock history keeps a line for the stock that came back."""
+    access.require(Permission.MANAGE_INVENTORY)
+    receipt_ref = receipts_collection(db, access.business_id).document(receipt_id)
+    receipt = crud.read_fresh(receipt_ref, Receipt)
+    if receipt is None:
+        raise not_found("Receipt")
+    _delete(db.transaction(), db, access, receipt_ref, _stock_refs(db, access, receipt))
+
+
+@firestore.transactional
+def _delete(
+    transaction: Transaction,
+    db: Client,
+    access: BusinessAccess,
+    receipt_ref: DocumentReference,
+    stock_refs: list[DocumentReference],
+) -> None:
+    snapshot = receipt_ref.get(transaction=transaction)
+    if not snapshot.exists:
+        raise not_found("Receipt")
+    receipt = Receipt.from_snapshot(snapshot)
+    if receipt.status == ReceiptStatus.COMPLETED:
+        _put_stock_back(transaction, db, access, receipt, stock_refs, note="Receipt deleted")
+    transaction.delete(receipt_ref)
+
+
+def _stock_refs(db: Client, access: BusinessAccess, receipt: Receipt) -> list[DocumentReference]:
+    """The stock record of each line of the receipt, in the same order."""
+    return [
+        inventory_document(db, access.business_id, line.product_id, line.variant_id, receipt.location_id)
+        for line in receipt.items
+    ]
+
+
+def _put_stock_back(
+    transaction: Transaction,
+    db: Client,
+    access: BusinessAccess,
+    receipt: Receipt,
+    stock_refs: list[DocumentReference],
+    note: str,
+) -> None:
+    """Removes the receipt's sales and adds their quantities back to stock, with a history line each.
+    Reads first, then writes (Firestore transactions need all reads before any write)."""
     snapshots = [ref.get(transaction=transaction) for ref in stock_refs]
 
     now = current_time_ms()
@@ -434,20 +488,12 @@ def _void(
             StockMovementType.SALE_UNDONE,
             line.quantity,
             access.user,
-            note=void_in.reason,
+            note=note,
             reference_id=receipt.id,
             reference_label=receipt.receipt_number,
         )
         transaction.set(ref, calculate_stock(stock).to_firestore())
         transaction.set(movement_ref, movement.to_firestore())
-
-    receipt.status = ReceiptStatus.VOIDED
-    receipt.voided_at = now
-    receipt.voided_by_name = _seller_name(access)
-    receipt.void_reason = void_in.reason
-    receipt.updated_at = now
-    transaction.set(receipt_ref, receipt.to_firestore())
-    return receipt
 
 
 # ---- Helpers --------------------------------------------------------------------------------

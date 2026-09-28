@@ -128,3 +128,9 @@ def void_receipt(
     receipt_id: str, void_in: VoidIn, db: Client = Depends(get_db), access: BusinessAccess = Depends(get_pos_access)
 ):
     return pos_controller.void_receipt(db, access, receipt_id, void_in)
+
+
+@router.delete("/businesses/{business_id}/pos/receipts/{receipt_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_receipt(receipt_id: str, db: Client = Depends(get_db), access: BusinessAccess = Depends(get_pos_access)):
+    """Managers only: removes the receipt and its sales for good (stock goes back unless it was voided)."""
+    pos_controller.delete_receipt(db, access, receipt_id)
