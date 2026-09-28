@@ -156,3 +156,23 @@ def test_sellers_are_managed_apart_from_the_team(client, shop):
     login_as("seller@test.com")
     assert client.get("/api/v1/pos/businesses").json() == []
     assert client.get(f"/api/v1/businesses/{business_id}/pos/context").status_code == 404
+
+
+def test_counter_prices_like_a_shop(client, shop):
+    """Tiers stop at 49, then 50+. Buying above a tier's "to quantity" keeps a price, and a product
+    whose only price is for one kind of buyer can still be sold to a walk-in customer."""
+    business_id = shop["business_id"]
+    product = client.post(f"/api/v1/businesses/{business_id}/products/full", json={
+        "productName": "Tube 275x18", "unit": "pc",
+        "prices": [{"price": 150, "maximumQuantity": 10, "customerType": "RETAILER", "priceType": "RETAIL"}],
+    }).json()["product"]
+    client.post(f"/api/v1/businesses/{business_id}/inventory",
+                json={"productId": product["id"], "locationId": shop["location_id"], "quantity": 50})
+
+    login_as("seller@test.com")
+    response = client.post(f"/api/v1/businesses/{business_id}/pos/checkouts", json={
+        "locationId": shop["location_id"], "date": TODAY,
+        "items": [{"productId": product["id"], "quantity": 12}],  # more than the tier's 10
+    })
+    assert response.status_code == 201, response.text
+    assert response.json()["total"] == 1800

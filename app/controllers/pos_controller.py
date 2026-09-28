@@ -21,7 +21,7 @@ from app.controllers.inventory_controller import (
     list_movements,
     new_movement,
 )
-from app.controllers.pricing import find_unit_price, is_current
+from app.controllers.pricing import is_current
 from app.controllers.product_controller import get_product, list_all_prices, list_all_variants, list_prices, list_products
 from app.core import cache
 from app.dependencies.business_access import BusinessAccess
@@ -146,18 +146,43 @@ def get_catalog(db: Client, access: BusinessAccess, today: datetime.date) -> lis
 def counter_tiers(prices: list[Price], currency: str, today: datetime.date) -> list[Price]:
     """The price tiers that apply to a walk-in customer today.
 
-    Tiers meant for one kind of business (e.g. retailers only) are left out. If the product
+    Tiers for everyone win over tiers for one kind of buyer (e.g. retailers only), but when a product
+    only has the latter, those are used: a walk-in customer can still buy it. Then, if the product
     has RETAIL tiers, only those are used; otherwise every tier counts."""
     usable = [
         p
         for p in prices
         if p.status == ActiveStatus.ACTIVE
         and p.currency == currency
-        and p.customer_type is None
         and is_current(p.effective_from, p.effective_until, today)
     ]
+    for_everyone = [p for p in usable if p.customer_type is None]
+    usable = for_everyone or usable
     retail = [p for p in usable if p.price_type == PriceType.RETAIL]
     return retail or usable
+
+
+def counter_unit_price(tiers: list[Price], variant_id: str | None, quantity: int) -> float | None:
+    """The price per unit at the counter, or None when the product has no price at all.
+
+    Like the order price (the variant's own tiers first, lowest fitting tier wins), except that
+    buying MORE than the biggest tier's "to quantity" keeps that tier's price instead of having none."""
+    variant_tiers = [t for t in tiers if variant_id and t.variant_id == variant_id]
+    tiers = variant_tiers or [t for t in tiers if t.variant_id is None]
+
+    fitting = [
+        t.price
+        for t in tiers
+        if t.minimum_quantity <= quantity and (t.maximum_quantity is None or quantity <= t.maximum_quantity)
+    ]
+    if fitting:
+        return min(fitting)
+
+    started = [t for t in tiers if t.minimum_quantity <= quantity]
+    if not started:
+        return None
+    biggest = max(t.minimum_quantity for t in started)
+    return min(t.price for t in started if t.minimum_quantity == biggest)
 
 
 # ---- Stock ----------------------------------------------------------------------------------
@@ -231,7 +256,7 @@ def checkout(db: Client, access: BusinessAccess, checkout_in: CheckoutIn) -> Rec
         name = f"{product.product_name} ({variant.variant_name})" if variant else product.product_name
 
         tiers = counter_tiers(list_prices(db, access.business_id, product_id), currency, checkout_in.date)
-        unit_price = find_unit_price(tiers, [], variant_id, quantity, [], currency, checkout_in.date)
+        unit_price = counter_unit_price(tiers, variant_id, quantity)
         if unit_price is None:
             raise bad_request(f"{name} has no selling price for this quantity")
 
