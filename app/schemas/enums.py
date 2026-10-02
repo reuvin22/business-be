@@ -163,6 +163,11 @@ class ActiveStatus(StrEnum):
     INACTIVE = "INACTIVE"
 
 
+class MediaType(StrEnum):
+    IMAGE = "IMAGE"
+    VIDEO = "VIDEO"
+
+
 class ProductStatus(StrEnum):
     ACTIVE = "ACTIVE"
     DRAFT = "DRAFT"

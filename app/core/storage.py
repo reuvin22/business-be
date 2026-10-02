@@ -1,4 +1,4 @@
-"""Image uploads to Cloudflare R2.
+"""Image and video uploads to Cloudflare R2.
 
 R2 works like Amazon S3, so we talk to it with boto3 (the S3 library).
 Each file gets a random name, so a URL never changes what it points to, and
@@ -18,7 +18,13 @@ ALLOWED_IMAGE_TYPES = {
     "image/webp": "webp",
     "image/gif": "gif",
 }
-MAX_IMAGE_BYTES = 5 * 1024 * 1024  # 5 MB
+ALLOWED_VIDEO_TYPES = {
+    "video/mp4": "mp4",
+    "video/webm": "webm",
+    "video/quicktime": "mov",
+}
+ALLOWED_TYPES = ALLOWED_IMAGE_TYPES | ALLOWED_VIDEO_TYPES
+MAX_FILE_BYTES = 25 * 1024 * 1024  # 25 MB, for each file (image or video)
 
 _client = None
 
@@ -37,12 +43,12 @@ def _get_client():
     return _client
 
 
-def upload_image(data: bytes, content_type: str, folder: str) -> str:
-    """Saves the image in R2 and returns its public URL.
+def upload_file(data: bytes, content_type: str, folder: str) -> str:
+    """Saves the image or video in R2 and returns its public URL.
 
-    folder: where it goes inside the bucket, e.g. "businesses/abc123/images".
+    folder: where it goes inside the bucket, e.g. "business_api/product_img/abc123".
     """
-    key = f"{folder}/{uuid.uuid4().hex}.{ALLOWED_IMAGE_TYPES[content_type]}"
+    key = f"{folder}/{uuid.uuid4().hex}.{ALLOWED_TYPES[content_type]}"
     _get_client().put_object(
         Bucket=settings.r2_bucket,
         Key=key,

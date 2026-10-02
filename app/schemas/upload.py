@@ -1,7 +1,9 @@
 from app.schemas.base import CamelModel
+from app.schemas.enums import MediaType
 
 
-class UploadedImage(CamelModel):
-    """Where an uploaded image can be seen."""
+class UploadedFile(CamelModel):
+    """Where an uploaded image or video can be seen."""
 
     url: str
+    media_type: MediaType

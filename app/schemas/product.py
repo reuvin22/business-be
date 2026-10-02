@@ -3,13 +3,16 @@ import datetime
 from pydantic import Field, model_validator
 
 from app.schemas.base import CamelModel, UrlText, check_date_order
-from app.schemas.enums import ActiveStatus, BusinessType, PriceType, ProductStatus, Visibility
+from app.schemas.enums import ActiveStatus, BusinessType, MediaType, PriceType, ProductStatus, Visibility
 
 
 class ProductImage(CamelModel):
+    """One photo or video of a product (the name stays "image" so products saved earlier still fit)."""
+
     image_url: UrlText = Field(min_length=1)
+    media_type: MediaType = MediaType.IMAGE
     sort_order: int = 0
-    is_primary: bool = False
+    is_primary: bool = False  # only an image can be the primary (it is the thumbnail in lists)
 
 
 class Specification(CamelModel):
@@ -56,11 +59,13 @@ class ProductIn(CamelModel):
 
     @model_validator(mode="after")
     def one_primary_image(self):
-        """Sorts images and makes sure exactly one is the primary (the first one, if none was chosen)."""
+        """Sorts images and videos, and makes sure exactly one image is the primary (the first image, if none
+        was chosen). Videos are never the primary, so a product with only videos has none."""
         self.images.sort(key=lambda image: image.sort_order)
-        primary_index = next((i for i, image in enumerate(self.images) if image.is_primary), 0)
-        for i, image in enumerate(self.images):
-            image.is_primary = i == primary_index
+        photos = [image for image in self.images if image.media_type == MediaType.IMAGE]
+        primary = next((image for image in photos if image.is_primary), photos[0] if photos else None)
+        for image in self.images:
+            image.is_primary = image is primary
         return self
 
 

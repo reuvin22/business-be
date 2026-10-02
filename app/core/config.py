@@ -4,7 +4,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     """App settings. Each value can be overridden in the .env file or as an environment variable."""
 
-    app_name: str = "My Business API"
+    app_name: str = "SIRIS API (Supplier Inventory & Retail Integration System)"
 
     # Firebase service account key. Used to check login tokens and to read/write Firestore.
     # Give EITHER the path to the key file, OR the whole key file contents (JSON text).

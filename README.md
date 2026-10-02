@@ -1,6 +1,6 @@
 # my-business-be
 
-The FastAPI backend for **my-business-fe**: a B2B platform where businesses (suppliers, manufacturers, distributors, retailers, …) keep their profile and catalog, find each other in a directory, order from each other, message each other, and review each other.
+The FastAPI backend for **SIRIS — Supplier Inventory & Retail Integration System** (frontend: **my-business-fe**): a B2B platform where businesses (suppliers, manufacturers, distributors, retailers, …) keep their profile and catalog, find each other in a directory, order from each other, message each other, and review each other.
 
 - **Login:** Firebase Authentication. The frontend sends the user's ID token and the API checks it.
 - **Database:** Cloud Firestore, accessed with the Firebase Admin SDK.
@@ -212,12 +212,15 @@ or ping `/api/health` every 10 minutes (for example with a free uptime monitor l
 
 ## Image uploads (Cloudflare R2)
 
-Product photos and business logos/covers are uploaded to Cloudflare R2
-(`POST /api/v1/businesses/{id}/images?kind=product|business`, form field `file`).
-The API checks the file really is an image (JPG, PNG, WEBP, GIF; up to 5 MB), stores it under
-`business_api/product_img/{id}/` or `business_api/business_img/{id}/` (the top folder is `R2_ROOT_FOLDER`),
-and returns its public URL, which is saved on the product or business. Images are optional.
-The browser shrinks photos before uploading (max 1600 px, WEBP), so uploads and pages stay fast.
+Product photos and videos, and business logos/covers, are uploaded to Cloudflare R2
+(`POST /api/v1/businesses/{id}/images?kind=product|business`, form field `file`, one file per request).
+The API checks what the file really is from its bytes: products take images (JPG, PNG, WEBP, GIF) and
+videos (MP4, WEBM, MOV); the logo and cover take images only. Each file can be up to 25 MB.
+It stores the file under `business_api/product_img/{id}/` or `business_api/business_img/{id}/`
+(the top folder is `R2_ROOT_FOLDER`) and returns its public URL and `mediaType` (`IMAGE` or `VIDEO`).
+A product can have any number of photos and videos (`images`, each with a `mediaType`); only an image
+can be the primary, which is the thumbnail in lists and in the POS. Media is optional.
+The browser shrinks photos before uploading (max 1600 px, WEBP), so uploads and pages stay fast; videos are sent as they are.
 
 Setup (once):
 1. Cloudflare dashboard, **R2 > Create bucket** (e.g. `my-business-images`).

@@ -122,7 +122,7 @@ def get_catalog(db: Client, access: BusinessAccess, today: datetime.date) -> lis
                 sku=product.sku,
                 barcode=product.barcode,
                 unit=product.unit,
-                image_url=product.images[0].image_url if product.images else "",
+                image_url=next((image.image_url for image in product.images if image.is_primary), ""),
                 category_id=product.category_id,
                 variants=[
                     PosVariant(id=v.id, variant_name=v.variant_name, sku=v.sku, barcode=v.barcode, unit=v.unit)
