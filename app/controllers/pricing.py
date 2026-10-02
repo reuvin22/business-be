@@ -78,17 +78,17 @@ def check_order_rules(rules: OrderRules, quantity: int, name: str) -> list[str]:
 
 
 def find_delivery_zone(zones: list[DeliveryZone], address: Address) -> DeliveryZone | None:
-    """The zone that matches the address. The most specific wins: barangay > city > province > region."""
+    """The zone that matches the address. The most specific wins: barangay > city > province > region > country."""
 
     def matches(zone: DeliveryZone) -> bool:
-        for field in ("region", "province", "city", "barangay"):
+        for field in ("country", "region", "province", "city", "barangay"):
             zone_value = getattr(zone, field)
             if zone_value and zone_value.strip().lower() != getattr(address, field).strip().lower():
                 return False
         return True
 
     def specificity(zone: DeliveryZone) -> tuple:
-        return (bool(zone.barangay), bool(zone.city), bool(zone.province), bool(zone.region))
+        return (bool(zone.barangay), bool(zone.city), bool(zone.province), bool(zone.region), bool(zone.country))
 
     matching = [zone for zone in zones if matches(zone)]
     return max(matching, key=specificity) if matching else None

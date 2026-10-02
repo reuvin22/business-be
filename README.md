@@ -181,6 +181,19 @@ Setup (once):
 3. **Deploy the rules** (they block everything until then, and the page says "Live updates are off"):
    `npx firebase-tools deploy --only database --project <your-project-id>`
 
+## Places (delivery zones)
+
+A delivery zone's area is picked level by level, each list filled from the one above (`GET /api/v1/geo/...`,
+signed-in users only, `app/core/geo.py`):
+- **Philippines:** the official PSGC lists (psgc.gitlab.io): region → province → city/municipality → barangay.
+  Metro Manila has no provinces, so its cities come straight from the region.
+- **Other countries:** CountriesNow (countriesnow.space): state/region → city.
+
+Every list is cached in Redis for **30 days**, shared by all users (scope `geo`), and kept in the browser for 7 days,
+so only the first person to open a list waits for the outside service. If a service is down, the picker says so and
+the name can be typed instead. Zones now have a `country` (empty on older zones = any country); the most specific
+zone wins: barangay > city > province > region > country.
+
 ## Online payments in the selling app (Xendit)
 
 With `XENDIT_SECRET_KEY` set, the till offers **Cash, E-wallet, Card, Bank transfer**. The last three are paid

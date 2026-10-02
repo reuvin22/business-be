@@ -20,8 +20,10 @@ class DeliverySettingsIn(CamelModel):
 
 
 class DeliveryZoneIn(CamelModel):
-    """A special fee for one area. The most specific match wins: barangay > city > province > region."""
+    """A special fee for one area. The most specific match wins: barangay > city > province > region > country.
+    The names come from the place pickers (see app/core/geo.py), so they match addresses picked the same way."""
 
+    country: str = ""  # e.g. "Philippines" (empty = any country, for zones made before countries were added)
     region: str = ""
     province: str = ""
     city: str = ""
@@ -31,6 +33,6 @@ class DeliveryZoneIn(CamelModel):
 
     @model_validator(mode="after")
     def needs_an_area(self):
-        if not (self.region or self.province or self.city or self.barangay):
-            raise ValueError("set at least one of region, province, city, or barangay")
+        if not (self.country or self.region or self.province or self.city or self.barangay):
+            raise ValueError("choose at least a country")
         return self

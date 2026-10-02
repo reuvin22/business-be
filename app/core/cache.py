@@ -46,6 +46,7 @@ KEY_PREFIX = "mb"
 DIRECTORY = "directory"
 CATEGORIES = "categories"
 ADMIN = "admin"
+GEO = "geo"  # place names (countries, regions, cities): the same for everyone, almost never change
 
 # When Redis stops answering, skip it for this long and use Firestore directly
 OFFLINE_PAUSE_SECONDS = 30
@@ -189,9 +190,15 @@ def bump(*scopes: str) -> None:
 
 
 def remember(
-    scope: str, key: str, load: Callable[[], T], to_json: Callable[[T], object], from_json: Callable[[object], T]
+    scope: str,
+    key: str,
+    load: Callable[[], T],
+    to_json: Callable[[T], object],
+    from_json: Callable[[object], T],
+    ttl_seconds: int | None = None,
 ) -> T:
-    """Returns the cached value, or runs `load()` and caches its result."""
+    """Returns the cached value, or runs `load()` and caches its result.
+    ttl_seconds: how long it lives (default: CACHE_TTL_SECONDS)."""
     client = _usable_client()
     if client is None:
         return load()
@@ -211,7 +218,7 @@ def remember(
 
     value = load()
     try:
-        client.set(cache_key, json.dumps(to_json(value)), ex=settings.cache_ttl_seconds)
+        client.set(cache_key, json.dumps(to_json(value)), ex=ttl_seconds or settings.cache_ttl_seconds)
     except redis.RedisError as error:
         _pause(error)
     return value
