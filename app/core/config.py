@@ -11,6 +11,8 @@ class Settings(BaseSettings):
     # The JSON option is handy on hosting platforms: paste the key into one environment variable.
     firebase_credentials_path: str = "firebase-service-account.json"
     firebase_credentials_json: str = ""
+    # Firebase Realtime Database (live chat). Firebase Console > Realtime Database > the address at the top.
+    firebase_database_url: str = "https://my-business-5bcad-default-rtdb.asia-southeast1.firebasedatabase.app"
 
     # Comma-separated list of frontend URLs that are allowed to call this API
     cors_origins: str = "http://localhost:5173"

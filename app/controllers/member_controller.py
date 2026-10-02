@@ -3,7 +3,7 @@ from google.cloud.firestore import ArrayRemove, ArrayUnion, Client
 
 from app.controllers import crud
 from app.controllers.crud import bad_request
-from app.core import cache
+from app.core import cache, realtime
 from app.core.firebase import find_user_by_email
 from app.core.permissions import ROLE_PERMISSIONS
 from app.dependencies.business_access import BusinessAccess
@@ -71,6 +71,9 @@ def update_member(db: Client, access: BusinessAccess, user_id: str, member_in: M
 
     # Only ACTIVE members are listed in memberUids (used for "my businesses")
     member_uids_change = ArrayUnion([user_id]) if updated.status == MemberStatus.ACTIVE else ArrayRemove([user_id])
+    if updated.status != MemberStatus.ACTIVE:
+        # First, so they cannot read the chats anymore even if the rest fails (they get it back when active again)
+        realtime.revoke_access(user_id, access.business_id)
 
     batch = db.batch()
     batch.set(members_collection(db, access.business_id).document(user_id), updated.to_firestore())
@@ -90,6 +93,7 @@ def remove_member(db: Client, access: BusinessAccess, user_id: str) -> None:
     if member.role == MemberRole.OWNER:
         raise bad_request("The owner cannot leave or be removed. Delete the business instead.")
 
+    realtime.revoke_access(user_id, access.business_id)  # first: no more reading the team's chats
     batch = db.batch()
     batch.delete(members_collection(db, access.business_id).document(user_id))
     batch.update(

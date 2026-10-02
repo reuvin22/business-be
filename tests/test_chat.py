@@ -1,0 +1,100 @@
+"""The live chat: team channel, market channel, and who may read them. The Realtime Database is in memory."""
+
+from types import SimpleNamespace
+
+import pytest
+from fastapi import HTTPException
+
+from app.controllers import chat_controller
+from app.core import realtime
+from app.schemas.chat import ChatMessageIn
+from app.schemas.enums import MemberRole, Permission
+from tests.conftest import create_business, login_as
+
+
+def member(business_id="b1", uid="u1", permissions=(Permission.SEND_MESSAGES,), name="Ana"):
+    """A stand-in for BusinessAccess (who is calling, for which business)."""
+    return SimpleNamespace(
+        business_id=business_id,
+        business=SimpleNamespace(business_name="Acme", business_logo=""),
+        member=SimpleNamespace(display_name=name, role=MemberRole.STAFF),
+        user=SimpleNamespace(uid=uid, name="", email="ana@test.com"),
+        can=lambda permission: permission in permissions,
+        require=lambda permission: None
+        if permission in permissions
+        else (_ for _ in ()).throw(HTTPException(status_code=403, detail="no")),
+    )
+
+
+def test_asking_for_access_lets_the_member_read_the_chats(fake_realtime):
+    access = chat_controller.get_access(member())
+    assert (access.team_path, access.market_path) == ("chat/team/b1/messages", "chat/market/messages")
+    assert fake_realtime.get("chatAccess/u1/b1") is True
+
+    realtime.revoke_access("u1", "b1")
+    assert fake_realtime.get("chatAccess/u1/b1") is None
+
+
+def test_team_and_market_messages(fake_realtime):
+    sent = chat_controller.send_team_message(member(), ChatMessageIn(message="Stock count at 5pm"))
+    assert sent.id and sent.sender_name == "Ana"
+    assert [m["message"] for m in fake_realtime.newest("chat/team/b1/messages", 50)] == ["Stock count at 5pm"]
+
+    post = chat_controller.send_market_message(member(), ChatMessageIn(message="Rice 25kg, 10% off this week"))
+    market = fake_realtime.newest("chat/market/messages", 50)
+    assert [(m["businessId"], m["businessName"]) for m in market] == [("b1", "Acme")]
+
+    # Another business cannot take it down; the business that posted it can
+    with pytest.raises(HTTPException) as refused:
+        chat_controller.delete_market_message(member(business_id="b2"), post.id)
+    assert refused.value.status_code == 403
+    chat_controller.delete_market_message(member(), post.id)
+    assert fake_realtime.newest("chat/market/messages", 50) == []
+
+
+def test_posting_in_the_market_needs_the_send_messages_permission(fake_realtime):
+    with pytest.raises(HTTPException):
+        chat_controller.send_market_message(member(permissions=()), ChatMessageIn(message="Hello"))
+    # The team channel is open to every member
+    chat_controller.send_team_message(member(permissions=()), ChatMessageIn(message="Hello team"))
+
+
+def test_chat_through_the_api(client, fake_realtime):
+    """With the Firestore emulator: the routes, and a removed member losing access."""
+    business_id = create_business(client)["id"]
+    access = client.get(f"/api/v1/businesses/{business_id}/chat").json()
+    assert access["teamPath"] == f"chat/team/{business_id}/messages"
+
+    client.post(f"/api/v1/businesses/{business_id}/members", json={"email": "staff@test.com", "role": "STAFF"})
+    login_as("staff@test.com")
+    staff_uid = client.get(f"/api/v1/businesses/{business_id}/chat").json()["uid"]
+    response = client.post(f"/api/v1/businesses/{business_id}/chat/team/messages", json={"message": "On my way"})
+    assert response.status_code == 201, response.text
+
+    login_as("owner@test.com")
+    client.delete(f"/api/v1/businesses/{business_id}/members/{staff_uid}")
+    assert fake_realtime.get(f"chatAccess/{staff_uid}/{business_id}") is None
+
+
+def test_direct_messages_move_to_the_realtime_database(fake_realtime, monkeypatch):
+    """The first time a conversation is used, its earlier messages are copied over; "seen" comes from lastReadAt."""
+    from app.controllers import conversation_controller
+    from app.models.network import Conversation, Message
+
+    earlier = Message(
+        id="old1", sender_uid="u2", sender_name="Ben", sender_business_id="b2", message="Hi", created_at=100, updated_at=100
+    )
+    monkeypatch.setattr(conversation_controller, "messages_collection", lambda db, conversation_id: None)
+    monkeypatch.setattr(conversation_controller.crud, "list_documents", lambda collection, model: [earlier])
+    conversation = Conversation(
+        id="c1", business_ids=["b1", "b2"], business_names={}, last_read_at={"b1": 150}, created_at=1, updated_at=1
+    )
+
+    conversation_controller._ensure_realtime(None, conversation)
+    assert fake_realtime.get("chat/dm/c1/meta") == {"a": "b1", "b": "b2", "lastReadAt": {"b1": 150}}
+
+    fake_realtime.push(
+        "chat/dm/c1/messages", {"senderUid": "u1", "senderName": "Ana", "senderBusinessId": "b1", "message": "Hello", "createdAt": 200}
+    )
+    messages = conversation_controller._read_messages(conversation)
+    assert [(m.message, m.read_at) for m in messages] == [("Hi", 150), ("Hello", None)]  # b2 has not read "Hello" yet

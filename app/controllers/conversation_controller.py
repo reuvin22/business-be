@@ -1,4 +1,8 @@
-"""Messages between two businesses (section 26)."""
+"""Messages between two businesses (section 26).
+
+The list of conversations (who, last message, unread) is in Firestore. The messages themselves are in
+the Realtime Database (chat/dm/{conversationId}, see app/core/realtime.py), so the page shows new ones
+the moment they are sent. Messages from before that are copied there the first time a chat is opened."""
 
 from google.cloud import firestore
 from google.cloud.firestore import Client, FieldFilter
@@ -6,7 +10,7 @@ from google.cloud.firestore import Client, FieldFilter
 from app.controllers import crud
 from app.controllers.business_controller import find_business
 from app.controllers.crud import bad_request, not_found
-from app.core import cache
+from app.core import cache, realtime
 from app.dependencies.business_access import BusinessAccess
 from app.models.network import Conversation, Message, conversations_collection, messages_collection
 from app.schemas.enums import Permission
@@ -33,7 +37,7 @@ def list_conversations(db: Client, access: BusinessAccess) -> list[ConversationV
         latest_first = query.order_by("lastMessageAt", direction=firestore.Query.DESCENDING)
         return [Conversation.from_snapshot(snapshot) for snapshot in crud.stream_indexed(latest_first, fallback=query)]
 
-    conversations = cache.cached_models(cache.business_scope(access.business_id), "conversations", Conversation, read)
+    conversations = cache.cached_models(cache.chat_scope(access.business_id), "conversations", Conversation, read)
     conversations.sort(key=lambda c: c.last_message_at, reverse=True)
     return [to_view(c, access.business_id) for c in conversations]
 
@@ -60,6 +64,7 @@ def start_conversation(db: Client, access: BusinessAccess, start_in: StartConver
             updated_at=now,
         )
         ref.set(conversation.to_firestore())
+        _ensure_realtime(db, conversation)
         conversation_id = ref.id
     else:
         conversation_id = existing.id
@@ -76,41 +81,34 @@ def get_conversation(db: Client, access: BusinessAccess, conversation_id: str) -
 
 
 def open_conversation(db: Client, access: BusinessAccess, conversation_id: str) -> ConversationWithMessages:
-    """Returns the messages and marks the other side's messages as read.
+    """Returns the newest messages and marks the conversation as read by this business.
 
-    The page asks for this every few seconds, so it only writes when something is actually unread.
-    """
+    The page calls this when a chat opens and when a new message arrives in it, so it only writes
+    when something is actually unread."""
     conversation = get_conversation(db, access, conversation_id)
-    messages = crud.list_documents(messages_collection(db, conversation_id), Message)
+    _ensure_realtime(db, conversation)
 
-    unread = [m for m in messages if m.sender_business_id != access.business_id and m.read_at is None]
-    if not unread and not conversation.unread:
-        return ConversationWithMessages(conversation=conversation, messages=messages)
+    if conversation.unread:
+        now = current_time_ms()
+        conversations_collection(db).document(conversation_id).update({f"lastReadAt.{access.business_id}": now})
+        realtime.get_store().set(f"{realtime.dm_path(conversation_id)}/meta/lastReadAt/{access.business_id}", now)
+        _clear_cache(conversation)
+        conversation.last_read_at[access.business_id] = now
+        conversation.unread = False
 
-    now = current_time_ms()
-    batch = db.batch()
-    for message in unread:
-        message.read_at = now
-        batch.update(messages_collection(db, conversation_id).document(message.id), {"readAt": now})
-    batch.update(conversations_collection(db).document(conversation_id), {f"lastReadAt.{access.business_id}": now})
-    batch.commit()
-    _clear_cache(conversation)
-
-    conversation.last_read_at[access.business_id] = now
-    conversation.unread = False
-    return ConversationWithMessages(conversation=conversation, messages=messages)
+    return ConversationWithMessages(conversation=conversation, messages=_read_messages(conversation))
 
 
 def send_message(db: Client, access: BusinessAccess, conversation_id: str, message_in: MessageIn) -> Message:
     access.require(Permission.SEND_MESSAGES)
-    get_conversation(db, access, conversation_id)
+    conversation = get_conversation(db, access, conversation_id)
+    _ensure_realtime(db, conversation)
 
     now = current_time_ms()
-    ref = messages_collection(db, conversation_id).document()
     message = Message(
-        id=ref.id,
+        id="",
         sender_uid=access.user.uid,
-        sender_name=access.user.name or access.user.email or "",
+        sender_name=access.member.display_name or access.user.name or access.user.email or "",
         sender_business_id=access.business_id,
         message=message_in.message,
         attachments=message_in.attachments,
@@ -118,26 +116,89 @@ def send_message(db: Client, access: BusinessAccess, conversation_id: str, messa
         updated_at=now,
     )
 
-    batch = db.batch()
-    batch.set(ref, message.to_firestore())
-    batch.update(
-        conversations_collection(db).document(conversation_id),
+    # The message goes live first; then the conversation list is brought up to date
+    store = realtime.get_store()
+    message.id = store.push(f"{realtime.dm_path(conversation_id)}/messages", _to_realtime(message))
+    store.set(f"{realtime.dm_path(conversation_id)}/meta/lastReadAt/{access.business_id}", now)
+    conversations_collection(db).document(conversation_id).update(
         {
             "lastMessage": message.message[:200],
             "lastMessageAt": now,
             "lastSenderBusinessId": access.business_id,
             f"lastReadAt.{access.business_id}": now,
             "updatedAt": now,
-        },
+        }
     )
-    batch.commit()
-    _clear_cache(get_conversation(db, access, conversation_id))
+    _clear_cache(conversation)
     return message
 
 
 def _clear_cache(conversation: Conversation) -> None:
-    """The conversation, its messages, and both businesses' conversation lists are now outdated."""
+    """The conversation and both businesses' conversation lists are now outdated.
+    Only their chat part: products, prices, and the rest stay cached."""
     cache.bump(
         cache.conversation_scope(conversation.id),
-        *[cache.business_scope(business_id) for business_id in conversation.business_ids],
+        *[cache.chat_scope(business_id) for business_id in conversation.business_ids],
     )
+
+
+# ---- The messages in the Realtime Database ------------------------------------------------------
+
+# Conversations this server already set up in the Realtime Database (saves a read on every message)
+_realtime_ready: set[str] = set()
+
+
+def _ensure_realtime(db: Client, conversation: Conversation) -> None:
+    """Makes sure the conversation exists in the Realtime Database: who is in it (the rules use this to
+    decide who may read it), when each side last read it, and the messages sent before it moved there."""
+    if conversation.id in _realtime_ready:
+        return
+    store = realtime.get_store()
+    path = realtime.dm_path(conversation.id)
+    if store.get(f"{path}/meta") is None:
+        first, second = conversation.business_ids
+        earlier = crud.list_documents(messages_collection(db, conversation.id), Message)
+        read_times = {business_id: at for business_id, at in conversation.last_read_at.items() if at}
+        store.update(
+            path,
+            {
+                "meta": {"a": first, "b": second, "lastReadAt": read_times},
+                **{f"messages/{m.id}": _to_realtime(m) for m in earlier},
+            },
+        )
+    _realtime_ready.add(conversation.id)
+
+
+def _to_realtime(message: Message) -> dict:
+    return {
+        "senderUid": message.sender_uid,
+        "senderName": message.sender_name,
+        "senderBusinessId": message.sender_business_id,
+        "message": message.message,
+        "attachments": message.attachments,
+        "createdAt": message.created_at,
+    }
+
+
+def _read_messages(conversation: Conversation) -> list[Message]:
+    """The newest messages, oldest first. A message is read once the other side opened the chat after it."""
+    found = realtime.get_store().newest(f"{realtime.dm_path(conversation.id)}/messages", realtime.MESSAGE_LIMIT)
+    messages = []
+    for item in found:
+        created_at = item.get("createdAt", 0)
+        others = [b for b in conversation.business_ids if b != item.get("senderBusinessId")]
+        read_at = max((conversation.last_read_at.get(b, 0) for b in others), default=0)
+        messages.append(
+            Message(
+                id=item["id"],
+                sender_uid=item.get("senderUid", ""),
+                sender_name=item.get("senderName", ""),
+                sender_business_id=item.get("senderBusinessId", ""),
+                message=item.get("message", ""),
+                attachments=item.get("attachments") or [],
+                read_at=read_at if read_at >= created_at else None,
+                created_at=created_at,
+                updated_at=created_at,
+            )
+        )
+    return messages

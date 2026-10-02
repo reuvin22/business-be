@@ -35,8 +35,17 @@ def get_firebase_app() -> firebase_admin.App:
     except ValueError:
         if using_emulators():
             project_id = os.environ.get("GCLOUD_PROJECT", "demo-my-business")
-            return firebase_admin.initialize_app(_EmulatorCredential(), {"projectId": project_id})
-        return firebase_admin.initialize_app(load_credentials())
+            return firebase_admin.initialize_app(
+                _EmulatorCredential(), {"projectId": project_id, "databaseURL": _database_url(project_id)}
+            )
+        return firebase_admin.initialize_app(load_credentials(), {"databaseURL": settings.firebase_database_url})
+
+
+def _database_url(project_id: str) -> str:
+    """With the Realtime Database emulator (FIREBASE_DATABASE_EMULATOR_HOST), the Admin SDK needs
+    an address that names the project's database; it then talks to the emulator."""
+    host = os.environ.get("FIREBASE_DATABASE_EMULATOR_HOST")
+    return f"http://{host}?ns={project_id}" if host else settings.firebase_database_url
 
 
 def using_emulators() -> bool:

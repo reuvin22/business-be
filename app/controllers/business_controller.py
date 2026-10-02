@@ -2,7 +2,7 @@ from google.cloud.firestore import Client, FieldFilter
 
 from app.controllers import crud
 from app.controllers.crud import forbidden
-from app.core import cache
+from app.core import cache, realtime
 from app.core.permissions import ALL_PERMISSIONS
 from app.dependencies.business_access import BusinessAccess, load_business
 from app.models.business import Business, business_document, businesses_collection
@@ -78,6 +78,8 @@ def delete_business(db: Client, access: BusinessAccess) -> None:
         raise forbidden("Only the owner can delete the business")
     # Firestore does not delete sub-collections on its own; recursive_delete does.
     db.recursive_delete(business_document(db, access.business_id))
+    # Its team channel goes too, and nobody can read its chats anymore (market posts and messages stay)
+    realtime.delete_team(access.business_id, access.business.member_uids)
     cache.bump(
         cache.business_scope(access.business_id),
         cache.DIRECTORY,

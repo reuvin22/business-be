@@ -123,6 +123,11 @@ def stock_scope(business_id: str) -> str:
     return f"business:{business_id}:stock"
 
 
+def chat_scope(business_id: str) -> str:
+    """A business's conversation list. Kept apart, so a message does not make products, prices, etc. outdated."""
+    return f"business:{business_id}:chat"
+
+
 # Collections under businesses/{id} that change with every sale or delivery
 STOCK_COLLECTIONS = {"inventory", "stockMovements", "sales", "receipts"}
 
@@ -172,7 +177,7 @@ def bump(*scopes: str) -> None:
     # A change to a whole business may change its stock too (e.g. shipping an order, deleting a product)
     everything = set(scopes)
     for scope in scopes:
-        if scope.startswith("business:") and not scope.endswith(":stock"):
+        if scope.startswith("business:") and scope.count(":") == 1:  # the whole business, not one part of it
             everything.add(f"{scope}:stock")
     try:
         pipe = client.pipeline(transaction=False)

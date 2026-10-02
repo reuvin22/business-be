@@ -6,7 +6,8 @@ import pytest
 from fastapi.testclient import TestClient
 from google.cloud import firestore
 
-from app.core import cache
+from app.controllers import conversation_controller
+from app.core import cache, realtime
 from app.core.firebase import get_db
 from app.dependencies.auth import get_current_user
 from app.main import app
@@ -24,6 +25,16 @@ def fake_redis():
     cache.set_client(fake)
     yield fake
     cache.set_client(None)
+
+
+@pytest.fixture(autouse=True)
+def fake_realtime():
+    """Every test gets its own in-memory Realtime Database (the live chat), never the real one."""
+    store = realtime.MemoryStore()
+    realtime.set_store(store)
+    conversation_controller._realtime_ready.clear()
+    yield store
+    realtime.set_store(None)
 
 
 # Fake accounts used by the tests (instead of real Firebase users)

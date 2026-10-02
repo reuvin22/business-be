@@ -12,6 +12,7 @@ from app.routes import (
     admin_routes,
     business_routes,
     catalog_routes,
+    chat_routes,
     commerce_routes,
     directory_routes,
     inventory_routes,
@@ -60,13 +61,15 @@ BUSINESS_URL = re.compile(r"^/api/v1/businesses/([^/]+)")
 READ_ONLY_POSTS = ("/orders/quote",)  # POSTs that don't change anything
 # Writes that only change stock (stock records, walk-in sales, the selling app)
 STOCK_ONLY_URL = re.compile(r"^/api/v1/businesses/[^/]+/(inventory|sales|pos)(/|$)")
+# Messages: their controllers clear exactly the chat caches they change, so nothing else is made outdated
+CHAT_URL = re.compile(r"^/api/v1/businesses/[^/]+/(chat|conversations)(/|$)")
 
 
 @app.middleware("http")
 async def clear_cache_after_changes(request: Request, call_next):
     response = await call_next(request)
     is_change = request.method in ("POST", "PUT", "PATCH", "DELETE") and response.status_code < 400
-    if is_change and not request.url.path.endswith(READ_ONLY_POSTS):
+    if is_change and not request.url.path.endswith(READ_ONLY_POSTS) and not CHAT_URL.match(request.url.path):
         match = BUSINESS_URL.match(request.url.path)
         if match and STOCK_ONLY_URL.match(request.url.path):
             # A sale or stock change: only the stock side is outdated (products, profile... stay cached)
@@ -116,6 +119,7 @@ for router_module in (
     commerce_routes,
     order_routes,
     network_routes,
+    chat_routes,
     pos_routes,
     upload_routes,
     admin_routes,

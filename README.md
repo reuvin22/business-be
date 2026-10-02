@@ -100,8 +100,17 @@ businesses/{businessId}                 identity + memberUids, verification, rat
 categories/{id}                          shared tree, managed by platform admins
 orders/{id}                              buyer + seller (businessIds), items copied in
 relationships/{id}                       two businesses (businessIds)
-conversations/{id}/messages/{id}
+conversations/{id}                       the list of chats (who, last message, unread); messages are in the Realtime Database
 verificationRequests/{id}
+```
+
+Realtime Database (live chat, `database.rules.json`):
+```
+chatAccess/{uid}/{businessId}            who may read a business's chats (kept by the API)
+chat/team/{businessId}/messages/{id}     a business's team channel
+chat/market/messages/{id}                the public market channel (every signed-in user reads it)
+chat/dm/{conversationId}/meta            the two businesses, when each last read the chat
+chat/dm/{conversationId}/messages/{id}   messages between two businesses
 ```
 
 Design choices:
@@ -148,12 +157,35 @@ A separate web app for selling at the counter, on the main business's own produc
   **Deploy the rules** or the apps fall back to refreshing every 10–15 seconds:
   `npx firebase-tools deploy --only firestore:rules --project <your-project-id>`
 
+## Messages (Firebase Realtime Database)
+
+The Messages page has three kinds of chat, and new messages show up the moment they are sent:
+- **# Team:** one channel per business, for its members only.
+- **# Market:** one public channel. Every signed-in user can read it; members with `messages.send` post in the name
+  of their business (offers, new products, what they're looking for) and can delete their business's own posts.
+- **Direct messages** between two businesses. Messages from before the move to the Realtime Database are copied
+  there the first time each conversation is opened.
+
+How it works: the browser only **listens** to the Realtime Database; every message is sent through this API
+(`/businesses/{id}/chat/...` and `/conversations/...`), which checks permissions and writes with the Admin SDK.
+The database rules cannot read Firestore, so the API keeps `chatAccess/{uid}/{businessId}`: it is written when a
+member opens Messages (`GET /businesses/{id}/chat`), and removed when they leave, are removed or made inactive, or
+the business is deleted. Seller accounts never get it.
+
+Setup (once):
+1. Firebase Console → **Realtime Database** → create the database (done: `my-business-5bcad-default-rtdb`, asia-southeast1).
+2. Set `FIREBASE_DATABASE_URL` on the server if it differs from the default in `app/core/config.py`, and
+   `VITE_FIREBASE_DATABASE_URL` in the main app (same address).
+3. **Deploy the rules** (they block everything until then, and the page says "Live updates are off"):
+   `npx firebase-tools deploy --only database --project <your-project-id>`
+
 ### Running everything locally on the emulators
 No real Firebase needed. The backend skips the key file when both emulator variables are set:
 
 ```powershell
-npx firebase-tools emulators:start --only "auth,firestore" --project demo-my-business   # terminal 1
+npx firebase-tools emulators:start --only "auth,firestore,database" --project demo-my-business   # terminal 1
 $env:FIRESTORE_EMULATOR_HOST="127.0.0.1:8080"; $env:FIREBASE_AUTH_EMULATOR_HOST="127.0.0.1:9099"
+$env:FIREBASE_DATABASE_EMULATOR_HOST="127.0.0.1:9000"                                          # live chat
 $env:GCLOUD_PROJECT="demo-my-business"; fastapi dev app/main.py                         # terminal 2
 ```
 In both frontends set `VITE_FIREBASE_EMULATORS=true` and `VITE_FIREBASE_PROJECT_ID=demo-my-business`.
