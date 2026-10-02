@@ -219,8 +219,7 @@ Product photos and videos, and business logos/covers, are uploaded to Cloudflare
 (`POST /api/v1/businesses/{id}/images?kind=product|business`, form field `file`, one file per request).
 The API checks what the file really is from its bytes: products take images (JPG, PNG, WEBP, GIF) and
 videos (MP4, WEBM, MOV); the logo and cover take images only. Each file can be up to 25 MB.
-It stores the file in the `R2_BUCKET` bucket under `product_img/{id}/` or `business_img/{id}/`
-(`R2_ROOT_FOLDER` can put them inside a top folder; empty by default) and returns its public URL and `mediaType` (`IMAGE` or `VIDEO`).
+It stores the file in the `R2_BUCKET` bucket under `product_img/{id}/` or `business_img/{id}/`, and returns its public URL and `mediaType` (`IMAGE` or `VIDEO`).
 A product can have any number of photos and videos (`images`, each with a `mediaType`); only an image
 can be the primary, which is the thumbnail in lists and in the POS. Media is optional.
 The browser shrinks photos before uploading (max 1600 px, WEBP), so uploads and pages stay fast; videos are sent as they are.
@@ -233,6 +232,8 @@ Setup (once):
    `R2_ACCOUNT_ID` (shown on the R2 overview page), `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`, `R2_PUBLIC_URL`.
 
 Until these are set, the upload button answers "Image uploads are not set up yet"; everything else works.
+After deploying, open `/api/health/r2` in a browser: it checks each R2 setting (without showing the keys) and
+tries to open the bucket, and lists anything that is wrong.
 
 ## Tests
 

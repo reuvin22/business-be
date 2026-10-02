@@ -5,7 +5,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.core import cache
+from app.core import cache, storage
 from app.core.config import settings
 from app.core.firebase import get_firebase_app
 from app.routes import (
@@ -36,9 +36,11 @@ logger = logging.getLogger(__name__)
 async def unexpected_errors(request: Request, call_next):
     try:
         return await call_next(request)
-    except Exception:
+    except Exception as error:
         logger.exception("Unexpected error on %s %s", request.method, request.url.path)
-        return JSONResponse(status_code=500, content={"detail": "Something went wrong on the server. Please try again."})
+        # Only the kind of error (e.g. ValueError) is shown, never its text, which may hold private details
+        detail = f"Something went wrong on the server ({type(error).__name__}). Please try again."
+        return JSONResponse(status_code=500, content={"detail": detail})
 
 
 # Lets the React app (running on another port) call this API from the browser
@@ -94,6 +96,14 @@ def firebase_check():
     except Exception as error:  # report any setup problem instead of a bare 500
         return JSONResponse(status_code=503, content={"status": "error", "detail": str(error)})
     return {"status": "ok"}
+
+
+@app.get("/api/health/r2", tags=["Health"])
+def r2_check():
+    """Open this in a browser after deploying: it checks the R2 settings (image uploads) and tries the bucket.
+    It never shows the keys."""
+    result = storage.status()
+    return JSONResponse(status_code=200 if result["status"] == "ok" else 503, content=result)
 
 
 # Version 1 of the API, e.g. /api/v1/businesses

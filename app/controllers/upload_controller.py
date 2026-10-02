@@ -26,7 +26,7 @@ def detect_file_type(data: bytes) -> str | None:
     return None
 
 
-# Each kind has its own folder (inside settings.r2_root_folder, if set), then one folder per business.
+# Each kind has its own folder at the top of the bucket, then one folder per business.
 # Products can have videos too; the logo and cover must be images.
 UPLOAD_KINDS = {
     "product": ("product_img", Permission.MANAGE_PRODUCTS, storage.ALLOWED_TYPES),
@@ -59,8 +59,6 @@ def upload_business_file(access: BusinessAccess, file: UploadFile, kind: str = "
             raise bad_request("Please choose a JPG, PNG, WEBP, or GIF image")
         raise bad_request("Please choose a JPG, PNG, WEBP, or GIF image, or an MP4, WEBM, or MOV video")
 
-    root = settings.r2_root_folder.strip("/")
-    path = f"{root}/{folder}" if root else folder
-    url = storage.upload_file(data, content_type, folder=f"{path}/{access.business_id}")
+    url = storage.upload_file(data, content_type, folder=f"{folder}/{access.business_id}")
     media_type = MediaType.VIDEO if content_type in storage.ALLOWED_VIDEO_TYPES else MediaType.IMAGE
     return url, media_type

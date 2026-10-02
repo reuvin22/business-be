@@ -18,7 +18,6 @@ def uploads(monkeypatch):
     for name in ("r2_account_id", "r2_access_key_id", "r2_secret_access_key", "r2_bucket"):
         monkeypatch.setattr(settings, name, "test")
     monkeypatch.setattr(settings, "r2_public_url", "https://images.test")
-    monkeypatch.setattr(settings, "r2_root_folder", "")
     saved = []
 
     def fake_upload(data, content_type, folder):
