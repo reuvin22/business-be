@@ -44,8 +44,8 @@ from app.schemas.enums import (
     Visibility,
 )
 from app.schemas.order import OrderChargesIn, OrderIn, OrderStatusIn, PaymentStatusIn, Quote, QuoteLine
+from app.schemas.payment import PaymentInstructions, payment_kind
 from app.schemas.views import OrderView
-from app.schemas.payment import PaymentInstructions
 from app.utils.helpers import current_time_ms
 
 # Which status changes each side may make: {current status: [allowed next statuses]}
@@ -136,7 +136,8 @@ def build_quote(db: Client, buyer: Business, seller: Business, order_in: OrderIn
     problems.extend(delivery_problems)
 
     accepted_types = list_accepted_payment_types(db, seller.id)
-    if order_in.payment_method_type and accepted_types and order_in.payment_method_type not in accepted_types:
+    payment_type = payment_kind(order_in.payment_method_type)  # an older kind (e.g. GCASH) counts as its new one
+    if payment_type and accepted_types and payment_type not in accepted_types:
         problems.append("This seller does not accept that payment method.")
     offered_terms = get_payment_terms(db, seller.id).payment_terms
     if order_in.payment_term and offered_terms and order_in.payment_term not in offered_terms:
@@ -191,7 +192,7 @@ def create_order(db: Client, access: BusinessAccess, order_in: OrderIn) -> Order
         total=quote.total,
         fulfillment_method=order_in.fulfillment_method,
         shipping_address=order_in.shipping_address,
-        payment_method_type=order_in.payment_method_type,
+        payment_method_type=payment_kind(order_in.payment_method_type),
         payment_term=order_in.payment_term,
         notes=order_in.notes,
         ordered_at=now,
@@ -258,7 +259,7 @@ def get_order_view(db: Client, access: BusinessAccess, order_id: str) -> OrderVi
         view.payment_instructions = [
             PaymentInstructions.model_validate(method)
             for method in list_payment_methods(db, order.seller_business_id)
-            if method.is_active and method.payment_type == order.payment_method_type
+            if method.is_active and method.payment_type == payment_kind(order.payment_method_type)
         ]
     return view
 

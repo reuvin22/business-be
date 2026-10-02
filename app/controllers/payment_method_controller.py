@@ -4,7 +4,7 @@ from app.controllers import crud
 from app.dependencies.business_access import BusinessAccess
 from app.models.profile import PaymentMethod, payment_methods_collection
 from app.schemas.enums import Permission, PaymentType
-from app.schemas.payment import PaymentMethodIn
+from app.schemas.payment import AcceptedPayment, PaymentMethodIn
 
 
 def list_payment_methods(db: Client, business_id: str) -> list[PaymentMethod]:
@@ -15,6 +15,17 @@ def list_accepted_payment_types(db: Client, business_id: str) -> list[PaymentTyp
     """The public part: which kinds of payment the business accepts, without account details."""
     types = {method.payment_type for method in list_payment_methods(db, business_id) if method.is_active}
     return sorted(types)
+
+
+def list_accepted_payments(db: Client, business_id: str) -> list[AcceptedPayment]:
+    """For the public profile: each kind with the banks / e-wallets / cards, never the account details."""
+    providers: dict[PaymentType, list[str]] = {}
+    for method in list_payment_methods(db, business_id):
+        if method.is_active:
+            names = providers.setdefault(method.payment_type, [])
+            if method.provider and method.provider not in names:
+                names.append(method.provider)
+    return [AcceptedPayment(payment_type=kind, providers=names) for kind, names in sorted(providers.items())]
 
 
 def create_payment_method(db: Client, access: BusinessAccess, method_in: PaymentMethodIn) -> PaymentMethod:

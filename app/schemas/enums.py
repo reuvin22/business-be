@@ -234,16 +234,22 @@ class FulfillmentMethod(StrEnum):
 
 
 class PaymentType(StrEnum):
+    """The kind of payment. Which bank, e-wallet, or card goes in the method's provider (e.g. E_WALLET + "GCash")."""
+
     CASH = "CASH"
     COD = "COD"
     BANK_TRANSFER = "BANK_TRANSFER"
+    E_WALLET = "E_WALLET"
+    CARD = "CARD"
+    ONLINE_PAYMENT = "ONLINE_PAYMENT"
+    CHEQUE = "CHEQUE"
+    CREDIT_TERMS = "CREDIT_TERMS"
+    # Older kinds that named the provider. Still read (old methods and orders); saved as the new kinds
+    # (see LEGACY_PAYMENT_TYPES in app/schemas/payment.py)
     GCASH = "GCASH"
     MAYA = "MAYA"
     CREDIT_CARD = "CREDIT_CARD"
     DEBIT_CARD = "DEBIT_CARD"
-    ONLINE_PAYMENT = "ONLINE_PAYMENT"
-    CHEQUE = "CHEQUE"
-    CREDIT_TERMS = "CREDIT_TERMS"
 
 
 class PaymentTerm(StrEnum):

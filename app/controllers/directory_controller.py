@@ -11,7 +11,7 @@ from app.controllers.crud import forbidden, not_found
 from app.controllers.customer_price_controller import list_prices_for_customer
 from app.controllers.delivery_zone_controller import list_delivery_zones
 from app.controllers.location_controller import list_locations
-from app.controllers.payment_method_controller import list_accepted_payment_types
+from app.controllers.payment_method_controller import list_accepted_payments
 from app.controllers.pricing import is_current
 from app.controllers.product_controller import list_prices, list_variants
 from app.controllers.review_controller import list_reviews
@@ -102,7 +102,7 @@ def _build_public_profile(db: Client, business_id: str) -> PublicProfile:
         delivery_zones,
         payment_terms,
         return_policy,
-        payment_types,
+        accepted_payments,
         certifications,
         social_links,
     ) = run_parallel(
@@ -114,7 +114,7 @@ def _build_public_profile(db: Client, business_id: str) -> PublicProfile:
         lambda: list_delivery_zones(db, business_id),
         lambda: settings_controller.get_payment_terms(db, business_id),
         lambda: settings_controller.get_return_policy(db, business_id),
-        lambda: list_accepted_payment_types(db, business_id),
+        lambda: list_accepted_payments(db, business_id),
         lambda: list_certifications(db, business_id),
         lambda: list_social_links(db, business_id),
     )
@@ -128,7 +128,8 @@ def _build_public_profile(db: Client, business_id: str) -> PublicProfile:
         delivery_zones=delivery_zones,
         payment_terms=payment_terms,
         return_policy=return_policy,
-        payment_types=payment_types,
+        payment_types=[accepted.payment_type for accepted in accepted_payments],
+        accepted_payments=accepted_payments,
         certifications=[PublicCertification.model_validate(c) for c in certifications],
         social_links=social_links,
     )
