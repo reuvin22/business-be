@@ -1,3 +1,4 @@
+import logging
 import re
 
 from fastapi import FastAPI, Request
@@ -26,6 +27,19 @@ from app.routes import (
 API_V1_PREFIX = "/api/v1"
 
 app = FastAPI(title=settings.app_name, version="1.0.0")
+logger = logging.getLogger(__name__)
+
+
+# Turns an unexpected error into a normal 500 answer. Added before CORS, so it runs inside it and the
+# answer still gets the CORS headers: the browser then shows the message instead of "Failed to fetch".
+@app.middleware("http")
+async def unexpected_errors(request: Request, call_next):
+    try:
+        return await call_next(request)
+    except Exception:
+        logger.exception("Unexpected error on %s %s", request.method, request.url.path)
+        return JSONResponse(status_code=500, content={"detail": "Something went wrong on the server. Please try again."})
+
 
 # Lets the React app (running on another port) call this API from the browser
 app.add_middleware(
