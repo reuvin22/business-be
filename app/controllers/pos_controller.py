@@ -450,30 +450,49 @@ def _save_checkout(
 
 
 def list_receipts(
-    db: Client, access: BusinessAccess, date: datetime.date | None, location_id: str | None
+    db: Client,
+    access: BusinessAccess,
+    date_from: datetime.date | None,
+    date_to: datetime.date | None,
+    location_id: str | None,
 ) -> list[Receipt]:
-    """Receipts of one day, newest first. Without a date: the newest ALL_DATES_LIMIT receipts of any day.
+    """Receipts from date_from to date_to (the seller's days, both included), newest first.
+    One day: all of it. Several days, or no dates (all of them): the newest ALL_DATES_LIMIT.
     Sellers see only their own."""
+    if date_from and date_to and date_from > date_to:
+        date_from, date_to = date_to, date_from
+    one_day = date_from is not None and date_from == date_to
+    first = date_from.isoformat() if date_from else ""
+    last = date_to.isoformat() if date_to else ""
 
     def read() -> list[Receipt]:
         query = receipts_collection(db, access.business_id)
-        if date:
-            query = query.where(filter=FieldFilter("date", "==", date.isoformat()))
         if location_id:
             query = query.where(filter=FieldFilter("locationId", "==", location_id))
-        newest_first = query.order_by("createdAt", direction=firestore.Query.DESCENDING)
-        if not date:
-            newest_first = newest_first.limit(ALL_DATES_LIMIT)
-        return [Receipt.from_snapshot(snapshot) for snapshot in crud.stream_indexed(newest_first, fallback=query)]
+        newest = firestore.Query.DESCENDING
+        if one_day:
+            ranged = query.where(filter=FieldFilter("date", "==", first)).order_by("createdAt", direction=newest)
+        else:
+            ranged = query
+            if first:
+                ranged = ranged.where(filter=FieldFilter("date", ">=", first))
+            if last:
+                ranged = ranged.where(filter=FieldFilter("date", "<=", last))
+            if first or last:
+                ranged = ranged.order_by("date", direction=newest)  # Firestore: a range is sorted by its field first
+            ranged = ranged.order_by("createdAt", direction=newest).limit(ALL_DATES_LIMIT)
+        # Until the indexes are deployed (firestore.indexes.json): the store's receipts, filtered here
+        return [Receipt.from_snapshot(snapshot) for snapshot in crud.stream_indexed(ranged, fallback=query)]
 
-    key = f"receipts:{date or 'all'}:{location_id}"
+    key = f"receipts:{first or 'start'}:{last or 'end'}:{location_id}"
     receipts = cache.cached_models(cache.stock_scope(access.business_id), key, Receipt, read)
+    receipts = [r for r in receipts if (not first or r.date >= first) and (not last or r.date <= last)]
     if access.member.role == MemberRole.SELLER:
         receipts = [r for r in receipts if r.seller_uid == access.user.uid]
     if location_id:
         receipts = [r for r in receipts if r.location_id == location_id]
     receipts = sorted(receipts, key=lambda receipt: receipt.created_at, reverse=True)
-    return receipts if date else receipts[:ALL_DATES_LIMIT]
+    return receipts if one_day else receipts[:ALL_DATES_LIMIT]
 
 
 def void_receipt(db: Client, access: BusinessAccess, receipt_id: str, void_in: VoidIn) -> Receipt:

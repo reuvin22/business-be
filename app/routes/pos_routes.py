@@ -130,13 +130,18 @@ def checkout(checkout_in: CheckoutIn, db: Client = Depends(get_db), access: Busi
 
 @router.get("/businesses/{business_id}/pos/receipts", response_model=list[Receipt])
 def list_receipts(
+    date_from: datetime.date | None = None,
+    date_to: datetime.date | None = None,
     date: datetime.date | None = None,
     location_id: str | None = None,
     db: Client = Depends(get_db),
     access: BusinessAccess = Depends(get_pos_access),
 ):
-    """Receipts of one day, or (without a date) the newest receipts of all days."""
-    return pos_controller.list_receipts(db, access, date, location_id)
+    """Receipts from date_from to date_to (YYYY-MM-DD, both included). Without dates: the newest of all days.
+    date: one day (the same as date_from = date_to; kept for older versions of the app)."""
+    if date:
+        date_from = date_to = date
+    return pos_controller.list_receipts(db, access, date_from, date_to, location_id)
 
 
 @router.post("/businesses/{business_id}/pos/receipts/{receipt_id}/void", response_model=Receipt)
