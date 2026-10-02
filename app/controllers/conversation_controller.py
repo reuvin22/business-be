@@ -46,31 +46,8 @@ def list_conversations(db: Client, access: BusinessAccess) -> list[ConversationV
 def start_conversation(db: Client, access: BusinessAccess, start_in: StartConversationIn) -> ConversationView:
     """Opens (or re-uses) the conversation with another business and sends the first message."""
     access.require(Permission.SEND_MESSAGES)
-    other_id = start_in.participant_business_id
-    if other_id == access.business_id:
-        raise bad_request("You cannot message your own business")
-    other = find_business(db, other_id)
-    if other is None:
-        raise not_found("Business")
-
-    existing = next((c for c in list_conversations(db, access) if c.other_business_id == other_id), None)
-    if existing is None:
-        now = current_time_ms()
-        ref = conversations_collection(db).document()
-        conversation = Conversation(
-            id=ref.id,
-            business_ids=[access.business_id, other_id],
-            business_names={access.business_id: access.business.business_name, other_id: other.business_name},
-            created_at=now,
-            updated_at=now,
-        )
-        ref.set(conversation.to_firestore())
-        _ensure_realtime(db, conversation)
-        conversation_id = ref.id
-    else:
-        conversation_id = existing.id
-
-    send_message(
+    conversation_id = _open_with(db, access, start_in.participant_business_id)
+    _send(
         db,
         access,
         conversation_id,
@@ -105,8 +82,45 @@ def open_conversation(db: Client, access: BusinessAccess, conversation_id: str) 
     return ConversationWithMessages(conversation=conversation, messages=_read_messages(conversation))
 
 
+def _open_with(db: Client, access: BusinessAccess, other_id: str) -> str:
+    """The id of the conversation with another business, made the first time."""
+    if other_id == access.business_id:
+        raise bad_request("You cannot message your own business")
+    other = find_business(db, other_id)
+    if other is None:
+        raise not_found("Business")
+
+    existing = next((c for c in list_conversations(db, access) if c.other_business_id == other_id), None)
+    if existing is not None:
+        return existing.id
+    now = current_time_ms()
+    ref = conversations_collection(db).document()
+    conversation = Conversation(
+        id=ref.id,
+        business_ids=[access.business_id, other_id],
+        business_names={access.business_id: access.business.business_name, other_id: other.business_name},
+        created_at=now,
+        updated_at=now,
+    )
+    ref.set(conversation.to_firestore())
+    _ensure_realtime(db, conversation)
+    return ref.id
+
+
+def send_order_message(db: Client, access: BusinessAccess, order) -> None:
+    """When a buyer places an order: a message to the seller, with the order as a card, asking them to confirm it.
+    Sent by the system for the buyer (placing an order is enough, no messaging permission needed)."""
+    conversation_id = _open_with(db, access, order.seller_business_id)
+    text = f"Hi {order.seller_business_name}! I placed order {order.order_number}. Please confirm this order."
+    _send(db, access, conversation_id, MessageIn(message=text, order_id=order.id))
+
+
 def send_message(db: Client, access: BusinessAccess, conversation_id: str, message_in: MessageIn) -> Message:
     access.require(Permission.SEND_MESSAGES)
+    return _send(db, access, conversation_id, message_in)
+
+
+def _send(db: Client, access: BusinessAccess, conversation_id: str, message_in: MessageIn) -> Message:
     conversation = get_conversation(db, access, conversation_id)
     _ensure_realtime(db, conversation)
 
