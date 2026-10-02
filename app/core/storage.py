@@ -9,6 +9,7 @@ import logging
 import uuid
 
 import boto3
+import httpx
 from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import HTTPException, status
 
@@ -90,13 +91,42 @@ def health() -> dict:
         if connection != "ok":
             problems.append(f"Could not open the bucket ({connection})")
 
+    public = _check_public_url(public_url) if connection == "ok" and public_url else "not tried"
+    if public not in ("ok", "not tried"):
+        problems.append(public)
+
     return {
         "status": "ok" if not problems else "error",
         "bucket": _bucket(),
         "public_url": public_url,
         "connection": connection,
+        "public_url_check": "ok" if public == "ok" else public,
         "problems": problems,
     }
+
+
+HEALTH_KEY = "health-check.txt"  # always the same file, so checking again adds nothing
+
+
+def _check_public_url(public_url: str) -> str:
+    """Writes a tiny file to the bucket and reads it back through R2_PUBLIC_URL: the uploads only show
+    in the app when that address really serves THIS bucket (each bucket has its own pub-....r2.dev)."""
+    marker = uuid.uuid4().hex
+    try:
+        _get_client().put_object(Bucket=_bucket(), Key=HEALTH_KEY, Body=marker.encode(), ContentType="text/plain", CacheControl="no-store")
+    except Exception as error:
+        return f"Could not write a test file to the bucket ({type(error).__name__})"
+    try:
+        response = httpx.get(f"{public_url.rstrip('/')}/{HEALTH_KEY}", timeout=15, headers={"Cache-Control": "no-cache"})
+    except httpx.HTTPError as error:
+        return f"R2_PUBLIC_URL could not be reached ({type(error).__name__})"
+    if response.status_code == 200 and response.text.strip() == marker:
+        return "ok"
+    return (
+        f"R2_PUBLIC_URL does not show the files of the bucket '{_bucket()}' (it answered HTTP {response.status_code}). "
+        "In Cloudflare: R2 > bucket '" + _bucket() + "' > Settings > Public Development URL: turn it on and copy that "
+        "exact address into R2_PUBLIC_URL (each bucket has its own)."
+    )
 
 
 def upload_file(data: bytes, content_type: str, folder: str) -> str:
