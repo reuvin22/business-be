@@ -84,15 +84,27 @@ class ReviewResponseIn(CamelModel):
 
 class StartConversationIn(CamelModel):
     participant_business_id: str = Field(min_length=1)
-    message: str = Field(min_length=1)
-    attachments: list[UrlText] = []
+    message: str = Field(default="", max_length=2000)
+    attachments: list[UrlText] = Field(default=[], max_length=4)  # photos (uploaded with kind=chat)
     order_id: str | None = None  # an order between the two businesses, shown as a card with the message
+
+    @model_validator(mode="after")
+    def text_or_photos(self):
+        if not self.message.strip() and not self.attachments:
+            raise ValueError("write a message or add a photo")
+        return self
 
 
 class MessageIn(CamelModel):
-    message: str = Field(min_length=1)
-    attachments: list[UrlText] = []
+    message: str = Field(default="", max_length=2000)
+    attachments: list[UrlText] = Field(default=[], max_length=4)  # photos (uploaded with kind=chat)
     order_id: str | None = None  # an order between the two businesses, shown as a card with the message
+
+    @model_validator(mode="after")
+    def text_or_photos(self):
+        if not self.message.strip() and not self.attachments:
+            raise ValueError("write a message or add a photo")
+        return self
 
 
 class OrderCardLine(CamelModel):

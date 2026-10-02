@@ -27,21 +27,23 @@ def detect_file_type(data: bytes) -> str | None:
 
 
 # Each kind has its own folder at the top of the bucket, then one folder per business.
-# Products can have videos too; the logo and cover must be images.
+# Products can have videos too; the logo, cover, and chat photos must be images.
+# Chat photos: any member may send them (sending the message itself checks who may write where).
 UPLOAD_KINDS = {
     "product": ("product_img", Permission.MANAGE_PRODUCTS, storage.ALLOWED_TYPES),
     "business": ("business_img", Permission.EDIT_BUSINESS, storage.ALLOWED_IMAGE_TYPES),
+    "chat": ("chat_img", None, storage.ALLOWED_IMAGE_TYPES),
 }
 
 
 def upload_business_file(access: BusinessAccess, file: UploadFile, kind: str = "product") -> tuple[str, MediaType]:
     """Checks the file and stores it in the folder for its kind. Returns its URL and whether it is an image or video.
 
-    kind: "product" (product photos and videos) or "business" (logo, cover)."""
+    kind: "product" (product photos and videos), "business" (logo, cover), or "chat" (photos sent in messages)."""
     if kind not in UPLOAD_KINDS:
-        raise bad_request("kind must be 'product' or 'business'")
+        raise bad_request("kind must be 'product', 'business', or 'chat'")
     folder, permission, allowed = UPLOAD_KINDS[kind]
-    if not access.can(permission):
+    if permission is not None and not access.can(permission):
         raise forbidden(f"You need the '{permission.value}' permission to upload this file")
     if not settings.r2_configured:
         raise HTTPException(

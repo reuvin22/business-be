@@ -135,7 +135,7 @@ def _send(db: Client, access: BusinessAccess, conversation_id: str, message_in: 
     store.set(f"{realtime.dm_path(conversation_id)}/meta/lastReadAt/{access.business_id}", now)
     conversations_collection(db).document(conversation_id).update(
         {
-            "lastMessage": message.message[:200],
+            "lastMessage": (message.message or "Sent a photo")[:200],
             "lastMessageAt": now,
             "lastSenderBusinessId": access.business_id,
             f"lastReadAt.{access.business_id}": now,
@@ -151,7 +151,7 @@ def _send(db: Client, access: BusinessAccess, conversation_id: str, message_in: 
         "message.received",
         f"New message from {access.business.business_name}",
         by=access,
-        detail=message.message,
+        detail=message.message or "Sent a photo",
         link=f"/messages?c={conversation_id}",
     )
     return message

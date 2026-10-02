@@ -55,7 +55,8 @@ def _post(access: BusinessAccess, path: str, message_in: ChatMessageIn) -> ChatM
         business_id=access.business_id,
         business_name=access.business.business_name,
         business_logo=access.business.business_logo,
-        message=message_in.message,
+        message=message_in.message.strip(),
+        attachments=message_in.attachments,
         created_at=current_time_ms(),
     )
     data = message.model_dump(mode="json", by_alias=True, exclude={"id"})

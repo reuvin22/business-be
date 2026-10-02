@@ -1,12 +1,21 @@
 """The live chat channels (see app/core/realtime.py): a business's team channel and the public market channel."""
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
-from app.schemas.base import CamelModel
+from app.schemas.base import CamelModel, UrlText
+
+MAX_PHOTOS = 4  # photos in one message
 
 
 class ChatMessageIn(CamelModel):
-    message: str = Field(min_length=1, max_length=2000)
+    message: str = Field(default="", max_length=2000)
+    attachments: list[UrlText] = Field(default=[], max_length=MAX_PHOTOS)  # photos (uploaded with kind=chat)
+
+    @model_validator(mode="after")
+    def text_or_photos(self):
+        if not self.message.strip() and not self.attachments:
+            raise ValueError("write a message or add a photo")
+        return self
 
 
 class ChatMessage(CamelModel):
@@ -19,6 +28,7 @@ class ChatMessage(CamelModel):
     business_name: str
     business_logo: str = ""
     message: str
+    attachments: list[str] = []  # photos
     created_at: int
 
 
