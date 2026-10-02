@@ -12,7 +12,7 @@ from app.schemas.enums import (
     VerificationStatus,
     VerificationType,
 )
-from app.schemas.network import CustomerPriceIn, Ratings
+from app.schemas.network import CustomerPriceIn, OrderCard, Ratings
 
 # ---- Relationships ---------------------------------------------------------------------
 # Firestore location:  relationships/{relationshipId}
@@ -93,6 +93,7 @@ class Message(FirestoreModel):
     sender_business_id: str
     message: str
     attachments: list[str] = []
+    order: OrderCard | None = None  # the order the message is about, as a small card
     read_at: int | None = None
 
 

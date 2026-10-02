@@ -13,8 +13,9 @@ from app.controllers.crud import bad_request, not_found
 from app.core import cache, realtime
 from app.dependencies.business_access import BusinessAccess
 from app.models.network import Conversation, Message, conversations_collection, messages_collection
+from app.models.trade import Order, orders_collection
 from app.schemas.enums import ActivityCategory, Permission
-from app.schemas.network import MessageIn, StartConversationIn
+from app.schemas.network import MessageIn, OrderCard, OrderCardLine, StartConversationIn
 from app.schemas.views import ConversationView, ConversationWithMessages
 from app.utils.helpers import current_time_ms
 
@@ -69,7 +70,12 @@ def start_conversation(db: Client, access: BusinessAccess, start_in: StartConver
     else:
         conversation_id = existing.id
 
-    send_message(db, access, conversation_id, MessageIn(message=start_in.message, attachments=start_in.attachments))
+    send_message(
+        db,
+        access,
+        conversation_id,
+        MessageIn(message=start_in.message, attachments=start_in.attachments, order_id=start_in.order_id),
+    )
     return get_conversation(db, access, conversation_id)
 
 
@@ -112,6 +118,7 @@ def send_message(db: Client, access: BusinessAccess, conversation_id: str, messa
         sender_business_id=access.business_id,
         message=message_in.message,
         attachments=message_in.attachments,
+        order=_order_card(db, conversation, message_in.order_id) if message_in.order_id else None,
         created_at=now,
         updated_at=now,
     )
@@ -181,7 +188,7 @@ def _ensure_realtime(db: Client, conversation: Conversation) -> None:
 
 
 def _to_realtime(message: Message) -> dict:
-    return {
+    data = {
         "senderUid": message.sender_uid,
         "senderName": message.sender_name,
         "senderBusinessId": message.sender_business_id,
@@ -189,6 +196,28 @@ def _to_realtime(message: Message) -> dict:
         "attachments": message.attachments,
         "createdAt": message.created_at,
     }
+    if message.order:
+        data["order"] = message.order.model_dump(mode="json", by_alias=True)
+    return data
+
+
+def _order_card(db: Client, conversation: Conversation, order_id: str) -> OrderCard:
+    """The order as a card. It must be an order between the two businesses of the conversation."""
+    snapshot = orders_collection(db).document(order_id).get()
+    order = Order.from_snapshot(snapshot) if snapshot.exists else None
+    if order is None or set(order.business_ids) != set(conversation.business_ids):
+        raise not_found("Order")
+    return OrderCard(
+        order_id=order.id,
+        order_number=order.order_number,
+        items=[
+            OrderCardLine(product_name=i.product_name, variant_name=i.variant_name, quantity=i.quantity, unit=i.unit)
+            for i in order.items
+        ],
+        total=order.total,
+        currency=order.currency,
+        status=order.order_status.value,
+    )
 
 
 def _read_messages(conversation: Conversation) -> list[Message]:
@@ -207,6 +236,7 @@ def _read_messages(conversation: Conversation) -> list[Message]:
                 sender_business_id=item.get("senderBusinessId", ""),
                 message=item.get("message", ""),
                 attachments=item.get("attachments") or [],
+                order=item.get("order"),
                 read_at=read_at if read_at >= created_at else None,
                 created_at=created_at,
                 updated_at=created_at,

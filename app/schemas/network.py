@@ -86,8 +86,28 @@ class StartConversationIn(CamelModel):
     participant_business_id: str = Field(min_length=1)
     message: str = Field(min_length=1)
     attachments: list[UrlText] = []
+    order_id: str | None = None  # an order between the two businesses, shown as a card with the message
 
 
 class MessageIn(CamelModel):
     message: str = Field(min_length=1)
     attachments: list[UrlText] = []
+    order_id: str | None = None  # an order between the two businesses, shown as a card with the message
+
+
+class OrderCardLine(CamelModel):
+    product_name: str
+    variant_name: str = ""
+    quantity: int
+    unit: str = ""
+
+
+class OrderCard(CamelModel):
+    """The order a message is about, copied when it was sent (so the message never changes afterwards)."""
+
+    order_id: str
+    order_number: str
+    items: list[OrderCardLine]
+    total: float
+    currency: str
+    status: str

@@ -98,3 +98,37 @@ def test_direct_messages_move_to_the_realtime_database(fake_realtime, monkeypatc
     )
     messages = conversation_controller._read_messages(conversation)
     assert [(m.message, m.read_at) for m in messages] == [("Hi", 150), ("Hello", None)]  # b2 has not read "Hello" yet
+
+
+def test_a_message_can_carry_an_order_between_the_two_businesses(monkeypatch):
+    from fastapi import HTTPException
+
+    from app.controllers import conversation_controller
+    from app.models.network import Conversation
+
+    order = {
+        "orderNumber": "ORD-1", "buyerBusinessId": "b2", "buyerBusinessName": "Acme", "sellerBusinessId": "b1",
+        "sellerBusinessName": "Motor Parts", "businessIds": ["b1", "b2"], "placedByUid": "u2", "currency": "PHP",
+        "subtotal": 650, "total": 650, "orderedAt": 1, "fulfillmentMethod": "PICKUP", "orderStatus": "PENDING",
+        "items": [{"productId": "p1", "productName": "185x17 Tube Fuji", "unit": "pcs", "quantity": 5, "unitPrice": 130, "subtotal": 650}],
+    }
+
+    class Doc:
+        def __init__(self, data):
+            self.id, self.exists, self._data = "o1", data is not None, data
+
+        def get(self):
+            return self
+
+        def to_dict(self):
+            return self._data
+
+    monkeypatch.setattr(conversation_controller, "orders_collection", lambda db: SimpleNamespace(document=lambda oid: Doc(order)))
+    ours = Conversation(id="c1", business_ids=["b1", "b2"], business_names={})
+    card = conversation_controller._order_card(None, ours, "o1")
+    assert (card.order_number, card.items[0].product_name, card.items[0].quantity, card.status) == ("ORD-1", "185x17 Tube Fuji", 5, "PENDING")
+
+    # An order of other businesses cannot be attached to this chat
+    theirs = Conversation(id="c2", business_ids=["b1", "b3"], business_names={})
+    with pytest.raises(HTTPException):
+        conversation_controller._order_card(None, theirs, "o1")
