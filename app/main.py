@@ -102,7 +102,7 @@ def firebase_check():
 def r2_check():
     """Open this in a browser after deploying: it checks the R2 settings (image uploads) and tries the bucket.
     It never shows the keys."""
-    result = storage.status()
+    result = storage.health()
     return JSONResponse(status_code=200 if result["status"] == "ok" else 503, content=result)
 
 

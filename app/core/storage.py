@@ -60,7 +60,7 @@ def _bucket() -> str:
     return settings.r2_bucket.strip()
 
 
-def status() -> dict:
+def health() -> dict:
     """For /api/health/r2: checks each R2 setting and tries to reach the bucket. Never shows the keys."""
     account_id = _account_id()
     public_url = settings.r2_public_url.strip()
