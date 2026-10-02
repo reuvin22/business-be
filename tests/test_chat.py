@@ -132,3 +132,41 @@ def test_a_message_can_carry_an_order_between_the_two_businesses(monkeypatch):
     theirs = Conversation(id="c2", business_ids=["b1", "b3"], business_names={})
     with pytest.raises(HTTPException):
         conversation_controller._order_card(None, theirs, "o1")
+
+
+def test_placing_an_order_messages_the_seller_once(monkeypatch, fake_realtime):
+    """The buyer's message with the order card goes to the seller's chat, without the messaging permission."""
+    from app.controllers import conversation_controller
+    from app.models.network import Message
+    from app.schemas.network import OrderCard
+    from app.schemas.views import ConversationView
+
+    chat = ConversationView(
+        id="c1", business_ids=["b2", "b1"], business_names={"b1": "Motor Parts", "b2": "Japonkie"}, other_business_id="b1"
+    )
+    updates = []
+    monkeypatch.setattr(conversation_controller, "_open_with", lambda db, access, other_id: "c1")
+    monkeypatch.setattr(conversation_controller, "get_conversation", lambda db, access, cid: chat)
+    monkeypatch.setattr(conversation_controller, "_ensure_realtime", lambda db, c: None)
+    monkeypatch.setattr(
+        conversation_controller,
+        "_order_card",
+        lambda db, c, oid: OrderCard(order_id=oid, order_number="ORD-1", items=[], total=260, currency="PHP", status="PENDING"),
+    )
+    monkeypatch.setattr(
+        conversation_controller,
+        "conversations_collection",
+        lambda db: SimpleNamespace(document=lambda cid: SimpleNamespace(update=updates.append)),
+    )
+    monkeypatch.setattr(conversation_controller.activity_controller, "record", lambda *a, **k: None)
+
+    buyer = member(business_id="b2", permissions=())  # may place orders, may not send messages
+    order = SimpleNamespace(id="o1", order_number="ORD-1", seller_business_id="b1", seller_business_name="Motor Parts")
+    conversation_controller.send_order_message(None, buyer, order)
+
+    sent = fake_realtime.newest("chat/dm/c1/messages", 10)
+    assert len(sent) == 1
+    assert sent[0]["message"] == "Hi Motor Parts! I placed order ORD-1. Please confirm this order."
+    assert sent[0]["order"]["orderNumber"] == "ORD-1"
+    assert updates[0]["lastMessage"].startswith("Hi Motor Parts!")
+    assert Message  # the message model was used to build it
