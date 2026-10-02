@@ -106,7 +106,20 @@ def get_context(db: Client, access: BusinessAccess) -> PosContext:
 
 
 def get_catalog(db: Client, access: BusinessAccess, today: datetime.date) -> list[PosProduct]:
-    """Active products with their variants and today's counter prices."""
+    """Active products with their variants and today's counter prices.
+
+    The whole catalog is cached as one entry (per day, since prices can start or end on a date), so
+    opening the selling app is one cache read instead of one per product. It is part of the business's
+    cache, so changing a product, variant, price, or the business itself makes it outdated."""
+    return cache.cached_models(
+        cache.business_scope(access.business_id),
+        f"pos-catalog:{today.isoformat()}",
+        PosProduct,
+        lambda: _build_catalog(db, access, today),
+    )
+
+
+def _build_catalog(db: Client, access: BusinessAccess, today: datetime.date) -> list[PosProduct]:
     # One after the other: each of these already reads its products in parallel
     products = list_products(db, access.business_id)
     variants = list_all_variants(db, access.business_id)
@@ -191,10 +204,15 @@ def counter_unit_price(tiers: list[Price], variant_id: str | None, quantity: int
 
 
 def list_stock(db: Client, access: BusinessAccess, location_id: str) -> list[InventoryItem]:
-    """Stock at one location. The app normally listens to Firestore instead; this is the fallback."""
+    """Stock at one location. The app normally listens to Firestore instead; this is the fallback
+    (asked every few seconds), so it is cached; every sale or stock change makes it outdated."""
     _get_location(db, access, location_id)
-    query = inventory_collection(db, access.business_id).where(filter=FieldFilter("locationId", "==", location_id))
-    return [InventoryItem.from_snapshot(snapshot) for snapshot in query.stream()]
+
+    def read() -> list[InventoryItem]:
+        query = inventory_collection(db, access.business_id).where(filter=FieldFilter("locationId", "==", location_id))
+        return [InventoryItem.from_snapshot(snapshot) for snapshot in query.stream()]
+
+    return cache.cached_models(cache.stock_scope(access.business_id), f"pos-stock:{location_id}", InventoryItem, read)
 
 
 def list_stock_history(db: Client, access: BusinessAccess, location_id: str) -> list[StockMovement]:

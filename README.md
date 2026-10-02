@@ -171,6 +171,9 @@ a public profile took about 2,000 ms from Firestore and about 70 ms from the cac
 - **Stock has its own version** (`business:{id}:stock`: inventory, stock history, sales, receipts). A sale,
   a stock change, or anything in the selling app bumps only that, so products, prices, the profile, and the
   rest stay cached through a busy day of selling.
+- **The selling app's catalog is one entry** (`pos-catalog:{date}` in the business scope): opening the till
+  reads it in one go instead of once per product. Changing a product, variant, price, or the business rebuilds it;
+  sales do not. The stock list for a store (`pos-stock:{location}`) is cached in the stock scope.
 - **Check it on the live server:** open `/api/health/cache`. It shows whether Redis is connected, how fast
   it answers (`pingMs`), how many keys it holds, and the last Redis error, if any.
 - **If you add a new write** that does not go through `/api/v1/businesses/{id}/...` or the `crud` helpers,

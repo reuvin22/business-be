@@ -121,3 +121,33 @@ def test_cache_status(client_without_db):
     status = client_without_db.get("/api/health/cache").json()
     assert status["status"] == "ok"
     assert status["ttlSeconds"] == 86400
+
+
+def test_the_selling_app_catalog_is_one_cache_entry(monkeypatch):
+    """Opening the selling app reads the whole catalog from one entry; a product change rebuilds it, a sale does not."""
+    import datetime
+    from types import SimpleNamespace
+
+    from app.controllers import pos_controller
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "redis_url", "redis://test")  # turns the cache on (the fake Redis is used)
+    builds = []
+    monkeypatch.setattr(pos_controller, "_build_catalog", lambda db, access, today: builds.append(today) or [])
+    access = SimpleNamespace(business_id="b1")
+    today = datetime.date(2026, 10, 2)
+
+    pos_controller.get_catalog(None, access, today)
+    pos_controller.get_catalog(None, access, today)
+    assert len(builds) == 1  # the second time came from the cache
+
+    cache.bump(cache.stock_scope("b1"))  # a sale
+    pos_controller.get_catalog(None, access, today)
+    assert len(builds) == 1
+
+    cache.bump(cache.business_scope("b1"))  # a product or price changed
+    pos_controller.get_catalog(None, access, today)
+    assert len(builds) == 2
+
+    pos_controller.get_catalog(None, access, today + datetime.timedelta(days=1))  # prices may change by date
+    assert len(builds) == 3
