@@ -26,7 +26,7 @@ def detect_file_type(data: bytes) -> str | None:
     return None
 
 
-# Each kind has its own folder (inside settings.r2_root_folder), then one folder per business.
+# Each kind has its own folder (inside settings.r2_root_folder, if set), then one folder per business.
 # Products can have videos too; the logo and cover must be images.
 UPLOAD_KINDS = {
     "product": ("product_img", Permission.MANAGE_PRODUCTS, storage.ALLOWED_TYPES),

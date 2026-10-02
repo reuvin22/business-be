@@ -51,7 +51,7 @@ def _get_client():
 def upload_file(data: bytes, content_type: str, folder: str) -> str:
     """Saves the image or video in R2 and returns its public URL.
 
-    folder: where it goes inside the bucket, e.g. "business_api/product_img/abc123".
+    folder: where it goes inside the bucket, e.g. "product_img/abc123".
     """
     key = f"{folder}/{uuid.uuid4().hex}.{ALLOWED_TYPES[content_type]}"
     try:

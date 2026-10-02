@@ -18,7 +18,7 @@ def uploads(monkeypatch):
     for name in ("r2_account_id", "r2_access_key_id", "r2_secret_access_key", "r2_bucket"):
         monkeypatch.setattr(settings, name, "test")
     monkeypatch.setattr(settings, "r2_public_url", "https://images.test")
-    monkeypatch.setattr(settings, "r2_root_folder", "business_api")
+    monkeypatch.setattr(settings, "r2_root_folder", "")
     saved = []
 
     def fake_upload(data, content_type, folder):
@@ -41,7 +41,7 @@ def test_upload_an_image(client, uploads):
     assert response.status_code == 201, response.text
     assert response.json()["url"].startswith("https://images.test/")
     assert response.json()["mediaType"] == "IMAGE"
-    assert uploads == [("image/png", f"business_api/product_img/{business_id}", len(PNG))]
+    assert uploads == [("image/png", f"product_img/{business_id}", len(PNG))]
 
 
 def test_business_images_go_in_their_own_folder(client, uploads):
@@ -49,7 +49,7 @@ def test_business_images_go_in_their_own_folder(client, uploads):
     response = upload(client, business_id, PNG, kind="business")
 
     assert response.status_code == 201, response.text
-    assert uploads == [("image/png", f"business_api/business_img/{business_id}", len(PNG))]
+    assert uploads == [("image/png", f"business_img/{business_id}", len(PNG))]
 
 
 def test_products_can_have_videos(client, uploads):
@@ -58,7 +58,7 @@ def test_products_can_have_videos(client, uploads):
 
     assert response.status_code == 201, response.text
     assert response.json()["mediaType"] == "VIDEO"
-    assert uploads == [("video/mp4", f"business_api/product_img/{business_id}", len(MP4))]
+    assert uploads == [("video/mp4", f"product_img/{business_id}", len(MP4))]
 
 
 def test_the_logo_and_cover_cannot_be_videos(client, uploads):
