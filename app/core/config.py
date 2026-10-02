@@ -35,6 +35,8 @@ class Settings(BaseSettings):
     r2_bucket: str = ""
     # The bucket's public address, e.g. https://pub-xxxx.r2.dev or https://images.yourdomain.com
     r2_public_url: str = ""
+    # Top folder in the bucket that holds all of this API's images (product_img/, business_img/ go inside it)
+    r2_root_folder: str = "business_api"
 
     @property
     def r2_configured(self) -> bool:

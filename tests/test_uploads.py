@@ -15,6 +15,7 @@ def uploads(monkeypatch):
     for name in ("r2_account_id", "r2_access_key_id", "r2_secret_access_key", "r2_bucket"):
         monkeypatch.setattr(settings, name, "test")
     monkeypatch.setattr(settings, "r2_public_url", "https://images.test")
+    monkeypatch.setattr(settings, "r2_root_folder", "business_api")
     saved = []
 
     def fake_upload(data, content_type, folder):
@@ -25,8 +26,9 @@ def uploads(monkeypatch):
     return saved
 
 
-def upload(client, business_id, data, name="photo.png", content_type="image/png"):
-    return client.post(f"/api/v1/businesses/{business_id}/images", files={"file": (name, data, content_type)})
+def upload(client, business_id, data, name="photo.png", content_type="image/png", kind=None):
+    params = {"kind": kind} if kind else {}
+    return client.post(f"/api/v1/businesses/{business_id}/images", params=params, files={"file": (name, data, content_type)})
 
 
 def test_upload_an_image(client, uploads):
@@ -35,7 +37,21 @@ def test_upload_an_image(client, uploads):
 
     assert response.status_code == 201, response.text
     assert response.json()["url"].startswith("https://images.test/")
-    assert uploads == [("image/png", f"businesses/{business_id}/images", len(PNG))]
+    assert uploads == [("image/png", f"business_api/product_img/{business_id}", len(PNG))]
+
+
+def test_business_images_go_in_their_own_folder(client, uploads):
+    business_id = create_business(client)["id"]
+    response = upload(client, business_id, PNG, kind="business")
+
+    assert response.status_code == 201, response.text
+    assert uploads == [("image/png", f"business_api/business_img/{business_id}", len(PNG))]
+
+
+def test_an_unknown_kind_is_refused(client, uploads):
+    business_id = create_business(client)["id"]
+    assert upload(client, business_id, PNG, kind="other").status_code == 400
+    assert uploads == []
 
 
 def test_a_file_pretending_to_be_an_image_is_refused(client, uploads):

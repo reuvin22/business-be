@@ -1,4 +1,4 @@
-"""Uploading images (product photos) to Cloudflare R2."""
+"""Uploading images (product photos, business logo and cover) to Cloudflare R2."""
 
 from fastapi import HTTPException, UploadFile, status
 
@@ -22,10 +22,22 @@ def detect_image_type(data: bytes) -> str | None:
     return None
 
 
-def upload_business_image(access: BusinessAccess, file: UploadFile) -> str:
-    """Checks the file and stores it in the business's image folder. Returns the image URL."""
-    if not (access.can(Permission.MANAGE_PRODUCTS) or access.can(Permission.EDIT_BUSINESS)):
-        raise forbidden("You need the 'products.manage' or 'business.edit' permission to upload images")
+# Each kind of image has its own folder (inside settings.r2_root_folder), then one folder per business
+IMAGE_FOLDERS = {
+    "product": ("product_img", Permission.MANAGE_PRODUCTS),
+    "business": ("business_img", Permission.EDIT_BUSINESS),
+}
+
+
+def upload_business_image(access: BusinessAccess, file: UploadFile, kind: str = "product") -> str:
+    """Checks the file and stores it in the folder for its kind. Returns the image URL.
+
+    kind: "product" (product photos) or "business" (logo, cover)."""
+    if kind not in IMAGE_FOLDERS:
+        raise bad_request("kind must be 'product' or 'business'")
+    folder, permission = IMAGE_FOLDERS[kind]
+    if not access.can(permission):
+        raise forbidden(f"You need the '{permission.value}' permission to upload this image")
     if not settings.r2_configured:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -40,4 +52,6 @@ def upload_business_image(access: BusinessAccess, file: UploadFile) -> str:
     if content_type is None:
         raise bad_request("Please choose a JPG, PNG, WEBP, or GIF image")
 
-    return storage.upload_image(data, content_type, folder=f"businesses/{access.business_id}/images")
+    root = settings.r2_root_folder.strip("/")
+    path = f"{root}/{folder}" if root else folder
+    return storage.upload_image(data, content_type, folder=f"{path}/{access.business_id}")

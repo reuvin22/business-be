@@ -212,9 +212,11 @@ or ping `/api/health` every 10 minutes (for example with a free uptime monitor l
 
 ## Image uploads (Cloudflare R2)
 
-Product photos are uploaded to Cloudflare R2 (`POST /api/v1/businesses/{id}/images`, form field `file`).
+Product photos and business logos/covers are uploaded to Cloudflare R2
+(`POST /api/v1/businesses/{id}/images?kind=product|business`, form field `file`).
 The API checks the file really is an image (JPG, PNG, WEBP, GIF; up to 5 MB), stores it under
-`businesses/{id}/images/`, and returns its public URL, which is saved on the product. Images are optional.
+`business_api/product_img/{id}/` or `business_api/business_img/{id}/` (the top folder is `R2_ROOT_FOLDER`),
+and returns its public URL, which is saved on the product or business. Images are optional.
 The browser shrinks photos before uploading (max 1600 px, WEBP), so uploads and pages stay fast.
 
 Setup (once):
