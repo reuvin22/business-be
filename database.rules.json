@@ -2,36 +2,57 @@
   "rules": {
     ".read": false,
     ".write": false,
-
     "chatAccess": {
       "$uid": {
         ".read": "auth != null && auth.uid === $uid"
       }
     },
-
     "chat": {
       "market": {
         "messages": {
           ".read": "auth != null",
-          ".indexOn": ["createdAt"]
+          ".indexOn": [
+            "createdAt"
+          ]
         }
       },
-
       "team": {
         "$businessId": {
           ".read": "auth != null && root.child('chatAccess').child(auth.uid).child($businessId).val() === true",
           "messages": {
-            ".indexOn": ["createdAt"]
+            ".indexOn": [
+              "createdAt"
+            ]
           }
         }
       },
-
       "dm": {
         "$conversationId": {
           ".read": "auth != null && data.child('meta/a').exists() && data.child('meta/b').exists() && (root.child('chatAccess').child(auth.uid).child(data.child('meta/a').val()).val() === true || root.child('chatAccess').child(auth.uid).child(data.child('meta/b').val()).val() === true)",
           "messages": {
-            ".indexOn": ["createdAt"]
+            ".indexOn": [
+              "createdAt"
+            ]
           }
+        }
+      }
+    },
+    "live": {
+      "$businessId": {
+        ".read": "auth != null && root.child('chatAccess').child(auth.uid).child($businessId).val() === true",
+        "activity": {
+          ".indexOn": [
+            "createdAt"
+          ]
+        }
+      }
+    },
+    "notificationSeen": {
+      "$uid": {
+        "$businessId": {
+          ".read": "auth != null && auth.uid === $uid",
+          ".write": "auth != null && auth.uid === $uid && root.child('chatAccess').child(auth.uid).child($businessId).val() === true",
+          ".validate": "newData.isNumber() && newData.val() <= now"
         }
       }
     }

@@ -2,7 +2,7 @@
 
 from google.cloud.firestore import Client, FieldFilter
 
-from app.controllers import crud
+from app.controllers import activity_controller, crud
 from app.controllers.crud import bad_request, not_found
 from app.core import cache
 from app.dependencies.business_access import BusinessAccess
@@ -17,7 +17,7 @@ from app.models.product import (
     variants_collection,
 )
 from app.models.profile import brands_collection
-from app.schemas.enums import Permission
+from app.schemas.enums import ActivityCategory, Permission
 from app.schemas.product import PriceIn, ProductFormIn, ProductIn, VariantIn
 from app.schemas.views import ProductFull
 from app.utils.helpers import current_time_ms
@@ -37,22 +37,43 @@ def get_product(db: Client, business_id: str, product_id: str) -> Product:
 def create_product(db: Client, access: BusinessAccess, product_in: ProductIn) -> Product:
     access.require(Permission.MANAGE_PRODUCTS)
     _check_brand_and_category(db, access.business_id, product_in)
-    return crud.create_document(products_collection(db, access.business_id), Product, product_in)
+    product = crud.create_document(products_collection(db, access.business_id), Product, product_in)
+    _record(db, access, product, "created")
+    return product
 
 
 def update_product(db: Client, access: BusinessAccess, product_id: str, product_in: ProductIn) -> Product:
     access.require(Permission.MANAGE_PRODUCTS)
     _check_brand_and_category(db, access.business_id, product_in)
-    return crud.update_document(products_collection(db, access.business_id), product_id, Product, product_in, "Product")
+    product = crud.update_document(products_collection(db, access.business_id), product_id, Product, product_in, "Product")
+    _record(db, access, product, "updated")
+    return product
 
 
 def delete_product(db: Client, access: BusinessAccess, product_id: str) -> None:
     """Deletes the product with its variants, prices, and stock records. Past orders and sales are kept."""
     access.require(Permission.MANAGE_PRODUCTS)
-    get_product(db, access.business_id, product_id)
+    product = get_product(db, access.business_id, product_id)
 
     _delete_inventory_where(db, access.business_id, "productId", product_id)
     db.recursive_delete(products_collection(db, access.business_id).document(product_id))
+    _record(db, access, product, "deleted")
+
+
+PRODUCT_ACTIONS = {"created": "Product added", "updated": "Product updated", "deleted": "Product deleted"}
+
+
+def _record(db: Client, access: BusinessAccess, product: Product, change: str) -> None:
+    """Adds the change to the business's activity history (and notifies the team)."""
+    activity_controller.record(
+        db,
+        access.business_id,
+        ActivityCategory.PRODUCTS,
+        f"product.{change}",
+        f"{PRODUCT_ACTIONS[change]}: {product.product_name}",
+        by=access,
+        link="" if change == "deleted" else f"/products/{product.id}",
+    )
 
 
 def _check_brand_and_category(db: Client, business_id: str, product_in: ProductIn) -> None:
@@ -238,6 +259,7 @@ def save_product_full(
 
     batch.commit()
     cache.bump(cache.business_scope(business_id), cache.DIRECTORY)
+    _record(db, access, product, "updated" if existing_product else "created")
     return ProductFull(product=product, variants=variants, prices=prices)
 
 

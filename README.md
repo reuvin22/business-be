@@ -111,6 +111,8 @@ chat/team/{businessId}/messages/{id}     a business's team channel
 chat/market/messages/{id}                the public market channel (every signed-in user reads it)
 chat/dm/{conversationId}/meta            the two businesses, when each last read the chat
 chat/dm/{conversationId}/messages/{id}   messages between two businesses
+live/{businessId}/activity/{id}          a business's activity, live (notifications)
+notificationSeen/{uid}/{businessId}      when you last opened the notifications (the only thing browsers write)
 ```
 
 Design choices:
@@ -178,6 +180,20 @@ Setup (once):
    `VITE_FIREBASE_DATABASE_URL` in the main app (same address).
 3. **Deploy the rules** (they block everything until then, and the page says "Live updates are off"):
    `npx firebase-tools deploy --only database --project <your-project-id>`
+
+## Activity history and notifications
+
+Product changes (added, updated, deleted), messages received from other businesses, and connection events
+(requested, accepted, declined, withdrawn, ended) are recorded for every business they concern, each from its own
+point of view ("You accepted…", "Acme withdrew their request"):
+- **History:** `businesses/{id}/activity` in Firestore. The **Activity** page lists it newest first, filtered by kind
+  (`GET /businesses/{id}/activity?category=PRODUCTS|MESSAGES|CONNECTIONS&start=<ms>&end=<ms>`; default all).
+  Index: `category` + `createdAt` (in `firestore.indexes.json`).
+- **Live:** the same entry is pushed to `live/{businessId}/activity` in the Realtime Database. The bell next to the
+  business name shows the newest ones (not your own changes) with an unread count. Open pages listen too: the
+  Network page and a business's directory page refresh the moment the other side accepts, declines, or withdraws,
+  and the Messages list moves a new conversation up right away.
+- Recording never fails the change that caused it (a problem is only logged).
 
 ### Running everything locally on the emulators
 No real Firebase needed. The backend skips the key file when both emulator variables are set:

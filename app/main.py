@@ -9,6 +9,7 @@ from app.core import cache, storage
 from app.core.config import settings
 from app.core.firebase import get_firebase_app
 from app.routes import (
+    activity_routes,
     admin_routes,
     business_routes,
     catalog_routes,
@@ -120,6 +121,7 @@ for router_module in (
     order_routes,
     network_routes,
     chat_routes,
+    activity_routes,
     pos_routes,
     upload_routes,
     admin_routes,

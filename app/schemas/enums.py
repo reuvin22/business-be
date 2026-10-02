@@ -163,6 +163,14 @@ class ActiveStatus(StrEnum):
     INACTIVE = "INACTIVE"
 
 
+class ActivityCategory(StrEnum):
+    """The groups the activity history can be filtered by."""
+
+    PRODUCTS = "PRODUCTS"
+    MESSAGES = "MESSAGES"
+    CONNECTIONS = "CONNECTIONS"
+
+
 class MediaType(StrEnum):
     IMAGE = "IMAGE"
     VIDEO = "VIDEO"

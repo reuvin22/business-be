@@ -10,6 +10,8 @@ Layout:
   chat/market/messages/{id}                    the public market channel (every signed-in user)
   chat/dm/{conversationId}/meta                {a, b: the two business ids, lastReadAt: {businessId: ms}}
   chat/dm/{conversationId}/messages/{id}       a conversation between two businesses
+  live/{businessId}/activity/{id}              a business's activity, live (notifications; history is in Firestore)
+  notificationSeen/{uid}/{businessId}          when this user last opened the notifications (the browser writes it)
 
 Messages are ordered by their createdAt field (indexed in the rules).
 """
@@ -41,6 +43,11 @@ MARKET_PATH = "chat/market/messages"
 
 def dm_path(conversation_id: str) -> str:
     return f"chat/dm/{conversation_id}"
+
+
+def live_path(business_id: str) -> str:
+    """A business's live activity feed (notifications), read by its members like its chats."""
+    return f"live/{business_id}/activity"
 
 
 # ---- Storage (the real database, or an in-memory one in tests) ------------------------------
@@ -164,8 +171,9 @@ def revoke_access(uid: str, business_id: str) -> None:
 
 
 def delete_team(business_id: str, member_uids: list[str]) -> None:
-    """When a business is deleted: its team channel goes, and its members lose access to its chats."""
+    """When a business is deleted: its team channel and live feed go, and its members lose access."""
     store = get_store()
     store.delete(f"chat/team/{business_id}")
+    store.delete(f"live/{business_id}")
     for uid in member_uids:
         store.delete(access_path(uid, business_id))

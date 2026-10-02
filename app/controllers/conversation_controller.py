@@ -7,13 +7,13 @@ the moment they are sent. Messages from before that are copied there the first t
 from google.cloud import firestore
 from google.cloud.firestore import Client, FieldFilter
 
-from app.controllers import crud
+from app.controllers import activity_controller, crud
 from app.controllers.business_controller import find_business
 from app.controllers.crud import bad_request, not_found
 from app.core import cache, realtime
 from app.dependencies.business_access import BusinessAccess
 from app.models.network import Conversation, Message, conversations_collection, messages_collection
-from app.schemas.enums import Permission
+from app.schemas.enums import ActivityCategory, Permission
 from app.schemas.network import MessageIn, StartConversationIn
 from app.schemas.views import ConversationView, ConversationWithMessages
 from app.utils.helpers import current_time_ms
@@ -130,6 +130,17 @@ def send_message(db: Client, access: BusinessAccess, conversation_id: str, messa
         }
     )
     _clear_cache(conversation)
+
+    activity_controller.record(
+        db,
+        conversation.other_business_id,
+        ActivityCategory.MESSAGES,
+        "message.received",
+        f"New message from {access.business.business_name}",
+        by=access,
+        detail=message.message,
+        link=f"/messages?c={conversation_id}",
+    )
     return message
 
 

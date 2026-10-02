@@ -6,13 +6,13 @@ One business asks, the other accepts or declines. Either side can end it later.
 from google.cloud import firestore
 from google.cloud.firestore import Client, FieldFilter
 
-from app.controllers import crud
+from app.controllers import activity_controller, crud
 from app.controllers.business_controller import find_business
 from app.controllers.crud import bad_request, not_found
 from app.core import cache
 from app.dependencies.business_access import BusinessAccess
 from app.models.network import Relationship, relationships_collection
-from app.schemas.enums import Permission, RelationshipStatus, RelationshipType
+from app.schemas.enums import ActivityCategory, Permission, RelationshipStatus, RelationshipType
 from app.schemas.network import RelationshipIn, RelationshipRespondIn, RelationshipView
 from app.utils.helpers import current_time_ms
 
@@ -96,6 +96,17 @@ def request_relationship(db: Client, access: BusinessAccess, relationship_in: Re
         updated_at=now,
     )
     _save(db, relationship)
+    role = activity_controller.role_text(relationship.relationship_type)
+    other_role = activity_controller.role_text(OPPOSITE_ROLE[relationship.relationship_type])
+    _record(
+        db,
+        access,
+        relationship,
+        "requested",
+        mine=f"You asked {other.business_name} to connect as your {role}",
+        theirs=f"{access.business.business_name} wants to connect. They would be your {other_role}.",
+        detail=relationship.notes,
+    )
     return to_view(relationship, access.business_id)
 
 
@@ -115,6 +126,26 @@ def respond_to_relationship(
     relationship.started_at = now if respond_in.accept else None
     relationship.updated_at = now
     _save(db, relationship)
+    asker = relationship.business_name
+    if respond_in.accept:
+        role = activity_controller.role_text(relationship.relationship_type)
+        _record(
+            db,
+            access,
+            relationship,
+            "accepted",
+            mine=f"You accepted {asker}'s request. You are now connected.",
+            theirs=f"{access.business.business_name} accepted your request. They are now your {role}.",
+        )
+    else:
+        _record(
+            db,
+            access,
+            relationship,
+            "declined",
+            mine=f"You declined {asker}'s request",
+            theirs=f"{access.business.business_name} declined your request",
+        )
     return to_view(relationship, access.business_id)
 
 
@@ -125,12 +156,61 @@ def end_relationship(db: Client, access: BusinessAccess, relationship_id: str) -
     if relationship.status not in (RelationshipStatus.PENDING, RelationshipStatus.ACTIVE):
         raise bad_request("This relationship has already ended")
 
+    was_request = relationship.status == RelationshipStatus.PENDING
     now = current_time_ms()
     relationship.status = RelationshipStatus.ENDED
     relationship.ended_at = now
     relationship.updated_at = now
     _save(db, relationship)
+
+    other_name = to_view(relationship, access.business_id).other_business_name
+    me = access.business.business_name
+    if was_request and relationship.business_id == access.business_id:
+        _record(
+            db,
+            access,
+            relationship,
+            "withdrawn",
+            mine=f"You withdrew your request to {other_name}",
+            theirs=f"{me} withdrew their request to connect",
+        )
+    elif was_request:
+        _record(
+            db,
+            access,
+            relationship,
+            "declined",
+            mine=f"You declined {other_name}'s request",
+            theirs=f"{me} declined your request",
+        )
+    else:
+        _record(
+            db,
+            access,
+            relationship,
+            "ended",
+            mine=f"You ended the connection with {other_name}",
+            theirs=f"{me} ended the connection with you",
+        )
     return to_view(relationship, access.business_id)
+
+
+def _record(
+    db: Client, access: BusinessAccess, relationship: Relationship, change: str, *, mine: str, theirs: str, detail: str = ""
+) -> None:
+    """Adds the change to both businesses' activity history, each from its own point of view."""
+    other_id = next(b for b in relationship.business_ids if b != access.business_id)
+    for business_id, title in ((access.business_id, mine), (other_id, theirs)):
+        activity_controller.record(
+            db,
+            business_id,
+            ActivityCategory.CONNECTIONS,
+            f"connection.{change}",
+            title,
+            by=access,
+            detail=detail,
+            link="/network",
+        )
 
 
 def _get(db: Client, access: BusinessAccess, relationship_id: str) -> Relationship:
