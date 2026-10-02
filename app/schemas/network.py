@@ -100,6 +100,8 @@ class OrderCardLine(CamelModel):
     variant_name: str = ""
     quantity: int
     unit: str = ""
+    unit_price: float | None = None  # None on cards sent before prices were included
+    subtotal: float | None = None
 
 
 class OrderCard(CamelModel):

@@ -217,7 +217,14 @@ def _order_card(db: Client, conversation: Conversation, order_id: str) -> OrderC
         order_id=order.id,
         order_number=order.order_number,
         items=[
-            OrderCardLine(product_name=i.product_name, variant_name=i.variant_name, quantity=i.quantity, unit=i.unit)
+            OrderCardLine(
+                product_name=i.product_name,
+                variant_name=i.variant_name,
+                quantity=i.quantity,
+                unit=i.unit,
+                unit_price=i.unit_price,
+                subtotal=i.subtotal,
+            )
             for i in order.items
         ],
         total=order.total,
