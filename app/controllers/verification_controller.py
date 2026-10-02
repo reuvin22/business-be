@@ -114,7 +114,9 @@ def review_request(db: Client, admin: CurrentUser, request_id: str, review_in: V
     if request.verification_type == VerificationType.BUSINESS and review_in.status == VerificationStatus.VERIFIED:
         settings_document(db, request.business_id, "legal").set({"verificationStatus": "VERIFIED"}, merge=True)
 
-    cache.bump(cache.business_scope(request.business_id), cache.ADMIN, cache.DIRECTORY)
+    # The badge also shows in each member's "My businesses" list
+    members = [cache.user_scope(uid) for uid in business.member_uids + business.seller_uids]
+    cache.bump(cache.business_scope(request.business_id), cache.ADMIN, cache.DIRECTORY, *members)
     return request
 
 

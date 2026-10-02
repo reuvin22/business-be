@@ -68,6 +68,9 @@ def update_business(db: Client, access: BusinessAccess, business_in: BusinessIn)
     changes = business_in.model_dump(mode="json", by_alias=True)
     changes["updatedAt"] = now
     business_document(db, access.business_id).update(changes)
+    # Each member's "My businesses" list (and each seller's list in the selling app) holds a copy of the
+    # business: the new name or logo must show there too, not only on the business's own pages
+    cache.bump(*[cache.user_scope(uid) for uid in access.business.member_uids + access.business.seller_uids])
 
     return Business(**{**access.business.model_dump(), **business_in.model_dump(), "updated_at": now})
 
