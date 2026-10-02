@@ -72,6 +72,10 @@ def list_activity(
 ) -> list[Activity]:
     """The history, newest first. start / end: milliseconds (the browser turns the chosen days into
     its own local midnight), so "today" means the user's today."""
+    # The first time: add what happened before the history existed (products, connections, messages)
+    from app.controllers.activity_backfill import ensure_backfilled
+
+    ensure_backfilled(db, access.business_id)
     query = activity_collection(db, access.business_id)
     if category:
         query = query.where(filter=FieldFilter("category", "==", category.value))
