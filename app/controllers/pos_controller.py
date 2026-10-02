@@ -61,6 +61,8 @@ from app.utils.parallel import run_parallel
 
 # Sellers may void their own receipts for this long; managers can void any receipt
 SELLER_VOID_WINDOW_MS = 24 * 60 * 60 * 1000
+# "All dates" in the receipts list shows this many of the newest receipts
+ALL_DATES_LIMIT = 500
 
 
 # ---- Starting the app -----------------------------------------------------------------------
@@ -369,23 +371,31 @@ def _save_checkout(
     return receipt
 
 
-def list_receipts(db: Client, access: BusinessAccess, date: datetime.date, location_id: str | None) -> list[Receipt]:
-    """Receipts of one day, newest first. Sellers see only their own."""
+def list_receipts(
+    db: Client, access: BusinessAccess, date: datetime.date | None, location_id: str | None
+) -> list[Receipt]:
+    """Receipts of one day, newest first. Without a date: the newest ALL_DATES_LIMIT receipts of any day.
+    Sellers see only their own."""
 
     def read() -> list[Receipt]:
-        query = receipts_collection(db, access.business_id).where(filter=FieldFilter("date", "==", date.isoformat()))
+        query = receipts_collection(db, access.business_id)
+        if date:
+            query = query.where(filter=FieldFilter("date", "==", date.isoformat()))
         if location_id:
             query = query.where(filter=FieldFilter("locationId", "==", location_id))
         newest_first = query.order_by("createdAt", direction=firestore.Query.DESCENDING)
+        if not date:
+            newest_first = newest_first.limit(ALL_DATES_LIMIT)
         return [Receipt.from_snapshot(snapshot) for snapshot in crud.stream_indexed(newest_first, fallback=query)]
 
-    key = f"receipts:{date}:{location_id}"
+    key = f"receipts:{date or 'all'}:{location_id}"
     receipts = cache.cached_models(cache.stock_scope(access.business_id), key, Receipt, read)
     if access.member.role == MemberRole.SELLER:
         receipts = [r for r in receipts if r.seller_uid == access.user.uid]
     if location_id:
         receipts = [r for r in receipts if r.location_id == location_id]
-    return sorted(receipts, key=lambda receipt: receipt.created_at, reverse=True)
+    receipts = sorted(receipts, key=lambda receipt: receipt.created_at, reverse=True)
+    return receipts if date else receipts[:ALL_DATES_LIMIT]
 
 
 def void_receipt(db: Client, access: BusinessAccess, receipt_id: str, void_in: VoidIn) -> Receipt:

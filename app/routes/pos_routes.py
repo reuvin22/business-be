@@ -115,11 +115,12 @@ def checkout(checkout_in: CheckoutIn, db: Client = Depends(get_db), access: Busi
 
 @router.get("/businesses/{business_id}/pos/receipts", response_model=list[Receipt])
 def list_receipts(
-    date: datetime.date,
+    date: datetime.date | None = None,
     location_id: str | None = None,
     db: Client = Depends(get_db),
     access: BusinessAccess = Depends(get_pos_access),
 ):
+    """Receipts of one day, or (without a date) the newest receipts of all days."""
     return pos_controller.list_receipts(db, access, date, location_id)
 
 

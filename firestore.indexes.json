@@ -191,6 +191,20 @@
       "queryScope": "COLLECTION",
       "fields": [
         {
+          "fieldPath": "locationId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "receipts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
           "fieldPath": "date",
           "order": "ASCENDING"
         },

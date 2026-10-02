@@ -137,7 +137,10 @@ A separate web app for selling at the counter, on the main business's own produc
 - **Selling:** `POST /businesses/{id}/pos/checkouts`. The server works out the prices (RETAIL tiers win when a
   product has them), checks the stock, and in one transaction takes it out, saves the receipt
   (`businesses/{id}/receipts`), one Sale per line, and the stock history. Voiding a receipt puts the stock back.
-- **Stock in / out:** `POST /businesses/{id}/pos/stock-changes` (+ delivery received, − damaged with a reason).
+- **Payments:** cash or e-wallet. Card and bank transfer are no longer accepted for new sales (older receipts keep them).
+- **Receipts:** `GET /businesses/{id}/pos/receipts?date=YYYY-MM-DD`, or without `date` for all dates (the newest 500).
+- **Stock in / out:** `POST /businesses/{id}/pos/stock-changes` (+ delivery received, − damaged with a reason). The selling app
+  no longer shows this; it only lists the recent stock changes.
 - **Realtime:** both apps *listen* to `businesses/{id}/inventory` (and the selling app to `products`) straight
   from Firestore, so a sale shows on the owner's Inventory page within a second, and a delivery recorded
   in the main app shows on the till. `firestore.rules` allows active members to **read** only those two
@@ -181,7 +184,7 @@ a public profile took about 2,000 ms from Firestore and about 70 ms from the cac
 - Lists are **filtered, sorted, and limited by Firestore**, not in Python, using the composite indexes in
   `firestore.indexes.json`. For example: my businesses (`memberUids` + `createdAt`), orders per side
   (`sellerBusinessId` + `orderedAt`), conversations (`businessIds` + `lastMessageAt`), stock history
-  (`productId` / `locationId` + `createdAt`, only the newest lines are read), receipts (`date` + `locationId` + `createdAt`).
+  (`productId` / `locationId` + `createdAt`, only the newest lines are read), receipts (`date` + `locationId` + `createdAt`, and `locationId` + `createdAt` for all dates).
 - `firestore.indexes.json` also turns **off** indexing for big fields that are never searched (descriptions,
   images, message text, order and receipt items). That makes writes faster and cheaper.
 - **Deploy the indexes** whenever that file changes (they take a few minutes to build; see Firebase Console →

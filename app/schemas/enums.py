@@ -331,8 +331,9 @@ class PosPaymentType(StrEnum):
     """How a walk-in customer paid at the counter (selling app)."""
 
     CASH = "CASH"
-    CARD = "CARD"
     E_WALLET = "E_WALLET"
+    # No longer offered for new sales (see CheckoutIn); kept so older receipts still load
+    CARD = "CARD"
     BANK_TRANSFER = "BANK_TRANSFER"
 
 

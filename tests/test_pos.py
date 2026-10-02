@@ -107,6 +107,18 @@ def test_void_puts_stock_back(client, shop):
     assert client.get(f"/api/v1/businesses/{shop['business_id']}/sales").json() == []
 
 
+def test_receipts_of_all_dates(client, shop):
+    login_as("seller@test.com")
+    first = checkout(client, shop, 1).json()
+    second = checkout(client, shop, 2).json()
+    url = f"/api/v1/businesses/{shop['business_id']}/pos/receipts"
+
+    # No date = every day; a date in the past has none of today's receipts
+    receipts = client.get(url, params={"location_id": shop["location_id"]}).json()
+    assert {r["id"] for r in receipts} == {first["id"], second["id"]}
+    assert client.get(url, params={"date": "2000-01-01"}).json() == []
+
+
 def test_seller_stays_at_their_store(client, shop):
     business_id = shop["business_id"]
     other = client.post(
