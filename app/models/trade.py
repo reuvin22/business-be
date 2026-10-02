@@ -63,6 +63,8 @@ class Order(FirestoreModel):
     payment_term: PaymentTerm | None = None
     notes: str = ""
     fulfillment_location_id: str | None = None  # seller's location the stock comes from
+    # True when accepting took the stock out (orders accepted before that only reserved it until shipping)
+    stock_taken: bool = False
     status_reason: str = ""  # why it was cancelled or rejected
     reviewed: bool = False
 

@@ -130,7 +130,7 @@ Design choices:
 | Team | The creator is OWNER. Add members by email (they must have signed up). Roles give default permissions (`app/core/permissions.py`); you can change them per member. |
 | Pricing | Price tiers per product/variant (quantity ranges, optional buyer type, dates). A private customer price for a buyer beats the tiers. The lowest applicable price wins. |
 | Ordering | Buyer asks for a quote (`POST /orders/quote`), then places the order. The server works out every price, checks MOQ / multiples / min value, delivery options and zones, payment method and terms. |
-| Order status | PENDING → (seller) CONFIRMED (reserves stock at a location) → SHIPPED (takes stock out) → DELIVERED → (buyer) COMPLETED. Seller can REJECT a pending order or CANCEL a confirmed one (releases stock); buyer can CANCEL while pending. |
+| Order status | PENDING → (seller) CONFIRMED = accepted (takes the stock out at a location) → SHIPPED → DELIVERED → (buyer) COMPLETED. Seller can REJECT a pending order or CANCEL an accepted one (puts the stock back); buyer can CANCEL while pending. Both businesses are notified of every step (activity + bell). |
 | Payments | Buyers see only the payment *types* publicly. After the seller confirms, the buyer sees the account details of the chosen method. |
 | Reviews | Only the buyer of a COMPLETED order can review, once per order, with separate 1–5 scores. The seller can reply; admins can hide. |
 | Relationships | "Acme is our SUPPLIER": the other side accepts or declines; either side can end it. |

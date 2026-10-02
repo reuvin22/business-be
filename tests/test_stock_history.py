@@ -37,7 +37,7 @@ def test_every_stock_change_is_recorded(client):
     assert latest["byName"] == "owner"
 
 
-def test_shipping_an_order_is_recorded(client):
+def test_accepting_an_order_is_recorded(client):
     seller_id = create_business(client, "Acme Supplies", ["SUPPLIER"])["id"]
     product_id, location_id = create_product_with_stock(client, seller_id, stock=50)
 
@@ -51,13 +51,14 @@ def test_shipping_an_order_is_recorded(client):
     login_as("owner@test.com")
     url = f"/api/v1/businesses/{seller_id}/orders/{order['id']}/status"
     client.post(url, json={"status": "CONFIRMED", "fulfillmentLocationId": location_id})
-    # Confirming only reserves stock, so nothing new in the history yet
-    assert history(client, seller_id) == [("STOCK_ADDED", 50, 50)]
+    # Accepting takes the stock out, with the order number on the history line
+    assert history(client, seller_id)[-1] == ("ORDER_ACCEPTED", -10, 40)
+    accepted = client.get(f"/api/v1/businesses/{seller_id}/stock-movements").json()[0]
+    assert accepted["referenceLabel"] == order["orderNumber"]
 
+    # Shipping changes nothing more: the stock already left when the order was accepted
     client.post(url, json={"status": "SHIPPED"})
-    assert history(client, seller_id)[-1] == ("ORDER_SHIPPED", -10, 40)
-    shipped = client.get(f"/api/v1/businesses/{seller_id}/stock-movements").json()[0]
-    assert shipped["referenceLabel"] == order["orderNumber"]
+    assert history(client, seller_id)[-1] == ("ORDER_ACCEPTED", -10, 40)
 
 
 def test_filter_history_by_product_and_removing_a_record(client):

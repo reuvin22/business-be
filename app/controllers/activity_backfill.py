@@ -3,6 +3,8 @@
 - products: when each was added (createdAt) and last changed (updatedAt). Deleted products left nothing.
 - connections: when each was requested, accepted or declined, and ended or withdrawn.
 - messages: every message another business sent (from the Realtime Database, or Firestore for older chats).
+- orders (added later, so it has its own marker): when each was placed, accepted or declined, shipped,
+  delivered, completed, or cancelled.
 
 The entries get fixed ids ("past-..."), so running it again changes nothing, and they are not pushed live
 (they are history, not news). A marker (settings/activityBackfill) makes it run only once per business.
@@ -24,13 +26,18 @@ from app.models.network import (
     relationships_collection,
 )
 from app.models.product import Product, products_collection
+from app.models.trade import Order, orders_collection
 from app.models.settings import settings_document
-from app.schemas.enums import ActivityCategory, RelationshipStatus
+from app.schemas.enums import ActivityCategory, OrderStatus, RelationshipStatus
 from app.utils.helpers import current_time_ms
 
 logger = logging.getLogger(__name__)
 
-MARKER = "activityBackfill"
+# One marker per part: a part added later (orders) still runs for businesses that already had the first one
+MARKERS = {
+    "activityBackfill": lambda db, business_id: _first_part(db, business_id),
+    "activityBackfillOrders": lambda db, business_id: _orders(db, business_id),
+}
 EDITED_AFTER_MS = 60_000  # a product saved more than a minute after it was added counts as edited
 BATCH_SIZE = 400  # Firestore takes at most 500 writes per batch
 
@@ -42,22 +49,35 @@ def ensure_backfilled(db: Client, business_id: str) -> None:
     if business_id in _done:
         return
     try:
-        marker = settings_document(db, business_id, MARKER)
-        if not marker.get().exists:
-            # Only what came before the first entry the live history recorded (no double entries)
-            first_live = _first_live_entry_at(db, business_id)
-            entries = [e for e in past_activity(db, business_id) if first_live is None or e.created_at < first_live]
+        for name, build in MARKERS.items():
+            marker = settings_document(db, business_id, name)
+            if marker.get().exists:
+                continue
+            # Only what came before the first entry the live history recorded of that kind (no double entries)
+            entries = build(db, business_id)
+            first_live = _first_live_entry_at(db, business_id, {e.category for e in entries})
+            entries = [e for e in entries if first_live is None or e.created_at < first_live]
             _save(db, business_id, entries)
             marker.set({"doneAt": current_time_ms(), "entries": len(entries)})
-            logger.info("Rebuilt %s past activity entries for business %s", len(entries), business_id)
+            logger.info("Rebuilt %s past activity entries (%s) for business %s", len(entries), name, business_id)
         _done.add(business_id)
     except Exception:
         logger.exception("Could not rebuild the past activity of business %s (will try again)", business_id)
 
 
-def _first_live_entry_at(db: Client, business_id: str) -> int | None:
-    oldest = activity_collection(db, business_id).order_by("createdAt").limit(1).stream()
-    return next((snapshot.to_dict().get("createdAt") for snapshot in oldest), None)
+def _first_live_entry_at(db: Client, business_id: str, categories: set) -> int | None:
+    """When the live history first recorded something of these kinds (rebuilt "past-" entries do not count)."""
+    times = [
+        data.get("createdAt", 0)
+        for snapshot in activity_collection(db, business_id).stream()
+        if not snapshot.id.startswith("past-")
+        and (data := snapshot.to_dict()).get("category") in {str(getattr(c, "value", c)) for c in categories}
+    ]
+    return min(times) if times else None
+
+
+def _first_part(db: Client, business_id: str) -> list[Activity]:
+    return past_activity(db, business_id)
 
 
 def past_activity(db: Client, business_id: str) -> list[Activity]:
@@ -220,6 +240,45 @@ def _messages(db: Client, business_id: str) -> list[Activity]:
                     link=f"/messages?c={conversation.id}",
                 )
             )
+    return entries
+
+
+def _orders(db: Client, business_id: str) -> list[Activity]:
+    """Each step of each order, from this business's side (the buyer, or the seller)."""
+    mine = FieldFilter("businessIds", "array_contains", business_id)
+    entries = []
+    for snapshot in orders_collection(db).where(filter=mine).stream():
+        o = Order.from_snapshot(snapshot)
+        selling = o.seller_business_id == business_id
+        other = o.buyer_business_name if selling else o.seller_business_name
+        number = o.order_number
+        summary = f"{len(o.items)} item(s), total {o.currency} {o.total:,.2f}"
+        steps = [
+            ("placed", o.ordered_at, f"New order {number} from {other}", f"You placed order {number} with {other}", other),
+            ("confirmed", o.confirmed_at, f"You accepted order {number}", f"{other} accepted your order {number}", ""),
+            ("shipped", o.shipped_at, f"You shipped order {number}", f"{other} shipped your order {number}", ""),
+            ("delivered", o.delivered_at, f"You marked order {number} as delivered", f"{other} delivered your order {number}", ""),
+            ("completed", o.completed_at, f"{other} confirmed receiving order {number}", f"You completed order {number}", other),
+        ]
+        if o.order_status in (OrderStatus.REJECTED, OrderStatus.CANCELLED) and o.cancelled_at:
+            verb = "declined" if o.order_status == OrderStatus.REJECTED else "cancelled"
+            steps.append(
+                (verb, o.cancelled_at, f"Order {number} was {verb}", f"Order {number} was {verb}", "")
+            )
+        for change, at, seller_text, buyer_text, actor in steps:
+            if at:
+                entries.append(
+                    _entry(
+                        f"order-{change}-{o.id}",
+                        ActivityCategory.ORDERS,
+                        f"order.{change}",
+                        seller_text if selling else buyer_text,
+                        at,
+                        actor=actor,
+                        detail=o.status_reason if change in ("declined", "cancelled") and o.status_reason else summary,
+                        link=f"/orders/{o.id}",
+                    )
+                )
     return entries
 
 

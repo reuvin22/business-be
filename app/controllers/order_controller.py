@@ -6,8 +6,11 @@ Life of an order:
        |--seller--> REJECTED   --seller--> CANCELLED
        |--buyer---> CANCELLED
 
-Stock: confirming reserves it at the chosen location, shipping takes it out,
-cancelling a confirmed order releases the reservation.
+Stock: accepting (CONFIRMED) takes the ordered quantities out at the chosen location, and cancelling an
+accepted order puts them back. (Orders accepted before that only reserved the stock; shipping those takes
+it out, and cancelling them releases the reservation: see Order.stock_taken.)
+
+Both businesses are notified of every step (activity history + the bell).
 """
 
 import datetime
@@ -16,7 +19,7 @@ from collections import defaultdict
 from google.cloud import firestore
 from google.cloud.firestore import Client, DocumentReference, FieldFilter, Transaction
 
-from app.controllers import crud
+from app.controllers import activity_controller, crud
 from app.controllers.business_controller import find_business
 from app.controllers.crud import bad_request, forbidden, not_found
 from app.controllers.customer_price_controller import list_prices_for_customer
@@ -34,6 +37,7 @@ from app.models.product import Product, Variant, products_collection, variants_c
 from app.models.profile import locations_collection
 from app.models.trade import Order, OrderItem, orders_collection
 from app.schemas.enums import (
+    ActivityCategory,
     ActiveStatus,
     BusinessStatus,
     DeliveryStatus,
@@ -201,6 +205,14 @@ def create_order(db: Client, access: BusinessAccess, order_in: OrderIn) -> Order
     )
     order_ref.set(order.to_firestore())
     _clear_cache(order)
+    _notify(
+        db,
+        access,
+        order,
+        "placed",
+        mine=f"You placed order {order.order_number} with {seller.business_name}",
+        theirs=f"New order {order.order_number} from {access.business.business_name}",
+    )
     return order
 
 
@@ -287,7 +299,53 @@ def change_order_status(db: Client, access: BusinessAccess, order_id: str, statu
     ship_from_name = location_name(db, order.seller_business_id, ship_from) if ship_from else ""
     updated = _change_status(db.transaction(), db, access, order_ref, order.order_status, status_in, ship_from_name)
     _clear_cache(updated)
+    _notify_status(db, access, updated)
     return updated
+
+
+# What each step says, to the business that did it and to the other one
+STATUS_TEXTS = {
+    OrderStatus.CONFIRMED: ("You accepted order {number}", "{me} accepted your order {number}"),
+    OrderStatus.REJECTED: ("You declined order {number}", "{me} declined your order {number}"),
+    OrderStatus.CANCELLED: ("You cancelled order {number}", "{me} cancelled order {number}"),
+    OrderStatus.SHIPPED: ("You shipped order {number}", "{me} shipped your order {number}"),
+    OrderStatus.DELIVERED: ("You marked order {number} as delivered", "{me} delivered your order {number}"),
+    OrderStatus.COMPLETED: ("You completed order {number}", "{me} confirmed receiving order {number}"),
+}
+
+
+def _notify_status(db: Client, access: BusinessAccess, order: Order) -> None:
+    texts = STATUS_TEXTS.get(order.order_status)
+    if texts:
+        values = {"number": order.order_number, "me": access.business.business_name}
+        _notify(
+            db,
+            access,
+            order,
+            order.order_status.value.lower(),
+            mine=texts[0].format(**values),
+            theirs=texts[1].format(**values),
+            detail=order.status_reason,
+        )
+
+
+def _notify(
+    db: Client, access: BusinessAccess, order: Order, change: str, *, mine: str, theirs: str, detail: str = ""
+) -> None:
+    """Both businesses get the step in their activity history; the other one also sees it in the bell."""
+    other_id = next(b for b in order.business_ids if b != access.business_id)
+    summary = detail or f"{len(order.items)} item(s), total {order.currency} {order.total:,.2f}"
+    for business_id, title in ((access.business_id, mine), (other_id, theirs)):
+        activity_controller.record(
+            db,
+            business_id,
+            ActivityCategory.ORDERS,
+            f"order.{change}",
+            title,
+            by=access,
+            detail=summary,
+            link=f"/orders/{order.id}",
+        )
 
 
 @firestore.transactional
@@ -310,9 +368,13 @@ def _change_status(
 
     # 1. Work out the stock changes (if any) and read the stock records
     stock_updates: list[tuple[DocumentReference, InventoryItem]] = []
-    history: list[tuple[DocumentReference, StockMovement]] = []  # stock history lines (when shipping)
-    touches_stock = new_status in (OrderStatus.CONFIRMED, OrderStatus.SHIPPED) or (
-        new_status == OrderStatus.CANCELLED and old_status == OrderStatus.CONFIRMED
+    history: list[tuple[DocumentReference, StockMovement]] = []  # stock history lines
+    # Accepting takes the stock out; cancelling an accepted order puts it back. An order accepted the old way
+    # (stock only reserved) still has its stock taken out when shipped.
+    touches_stock = (
+        new_status == OrderStatus.CONFIRMED
+        or (new_status == OrderStatus.SHIPPED and not order.stock_taken)
+        or (new_status == OrderStatus.CANCELLED and old_status == OrderStatus.CONFIRMED)
     )
     if touches_stock:
         # Add up quantities per stock record (the same product can appear on two lines)
@@ -336,28 +398,35 @@ def _change_status(
                 raise bad_request(f"{names[ref_id]} has no stock record at this location")
             stock = InventoryItem.from_snapshot(snapshot)
 
+            movement: tuple[StockMovementType, float] | None = None
             if new_status == OrderStatus.CONFIRMED:
                 if stock.available_quantity < quantity:
                     raise bad_request(f"Not enough {names[ref_id]}: {stock.available_quantity:g} available, {quantity} needed")
-                stock.reserved_quantity += quantity
-            elif new_status == OrderStatus.SHIPPED:
+                stock.quantity -= quantity
+                movement = (StockMovementType.ORDER_ACCEPTED, -quantity)
+            elif new_status == OrderStatus.CANCELLED and order.stock_taken:
+                stock.quantity += quantity
+                movement = (StockMovementType.ORDER_CANCELLED, quantity)
+            elif new_status == OrderStatus.SHIPPED:  # accepted the old way: the stock is taken out now
                 stock.quantity -= quantity
                 stock.reserved_quantity = max(stock.reserved_quantity - quantity, 0)
+                movement = (StockMovementType.ORDER_SHIPPED, -quantity)
+            else:  # cancelling an order accepted the old way: release the reservation
+                stock.reserved_quantity = max(stock.reserved_quantity - quantity, 0)
+            if movement:
                 history.append(
                     new_movement(
                         db,
                         order.seller_business_id,
                         stock,
                         stock_names_by_ref[ref_id],
-                        StockMovementType.ORDER_SHIPPED,
-                        -quantity,
+                        movement[0],
+                        movement[1],
                         access.user,
                         reference_id=order.id,
                         reference_label=order.order_number,
                     )
                 )
-            else:  # cancelling a confirmed order
-                stock.reserved_quantity = max(stock.reserved_quantity - quantity, 0)
 
             stock.updated_at = current_time_ms()
             stock_updates.append((ref, calculate_stock(stock)))
@@ -369,6 +438,7 @@ def _change_status(
     if new_status == OrderStatus.CONFIRMED:
         order.confirmed_at = now
         order.fulfillment_location_id = location_id
+        order.stock_taken = True
     elif new_status == OrderStatus.SHIPPED:
         order.shipped_at = now
         order.delivery_status = DeliveryStatus.SHIPPED

@@ -169,6 +169,7 @@ class ActivityCategory(StrEnum):
     PRODUCTS = "PRODUCTS"
     MESSAGES = "MESSAGES"
     CONNECTIONS = "CONNECTIONS"
+    ORDERS = "ORDERS"
 
 
 class MediaType(StrEnum):
@@ -203,7 +204,9 @@ class StockMovementType(StrEnum):
     CORRECTION = "CORRECTION"  # someone typed in a new quantity
     SALE = "SALE"  # walk-in sale
     SALE_UNDONE = "SALE_UNDONE"  # a walk-in sale was undone, stock put back
-    ORDER_SHIPPED = "ORDER_SHIPPED"  # an order left the location
+    ORDER_SHIPPED = "ORDER_SHIPPED"  # an order left the location (orders accepted before stock was taken on accept)
+    ORDER_ACCEPTED = "ORDER_ACCEPTED"  # the seller accepted an order: its quantities were taken out
+    ORDER_CANCELLED = "ORDER_CANCELLED"  # an accepted order was cancelled: its quantities were put back
     RECORD_REMOVED = "RECORD_REMOVED"  # the stock record was deleted
 
 

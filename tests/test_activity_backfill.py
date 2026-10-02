@@ -88,22 +88,47 @@ def test_past_activity_from_products_connections_and_messages(monkeypatch, fake_
 
 def test_it_runs_once_per_business(monkeypatch, fake_realtime):
     fake_firestore(monkeypatch, fake_realtime)
+    monkeypatch.setattr(activity_backfill, "orders_collection", lambda db: Query(ORDERS))
     saved, markers = [], {}
 
     class Marker:
+        def __init__(self, name):
+            self.name = name
+
         def get(self):
-            return Snapshot("m", markers.get("b1"))
+            return Snapshot("m", markers.get(self.name))
 
         def set(self, data):
-            markers["b1"] = data
+            markers[self.name] = data
 
-    monkeypatch.setattr(activity_backfill, "settings_document", lambda db, b, name: Marker())
+    monkeypatch.setattr(activity_backfill, "settings_document", lambda db, b, name: Marker(name))
     monkeypatch.setattr(activity_backfill, "_save", lambda db, b, entries: saved.append(len(entries)))
-    monkeypatch.setattr(activity_backfill, "_first_live_entry_at", lambda db, b: 9_200)  # the live history began here
+    # The live history began at 9_200 (orders were not recorded live yet)
+    monkeypatch.setattr(activity_backfill, "_first_live_entry_at", lambda db, b, kinds: None if "ORDERS" in kinds else 9_200)
     activity_backfill._done.clear()
 
     activity_backfill.ensure_backfilled(None, "b1")
-    activity_backfill._done.clear()  # as if the server restarted: the marker still stops it
+    activity_backfill._done.clear()  # as if the server restarted: the markers still stop it
     activity_backfill.ensure_backfilled(None, "b1")
-    # 3 product, 4 connection, 1 message entries, minus the product edit after the live history began
-    assert saved == [7] and markers["b1"]["entries"] == 7
+    # First part: 3 product, 4 connection, 1 message entries, minus the product edit after the live history began.
+    # Orders (their own marker): placed + accepted
+    assert saved == [7, 2]
+    assert (markers["activityBackfill"]["entries"], markers["activityBackfillOrders"]["entries"]) == (7, 2)
+
+
+ORDERS = {
+    "o1": {  # b2 ordered from b1 (b1 sells); b1 accepted
+        "orderNumber": "ORD-1", "buyerBusinessId": "b2", "buyerBusinessName": "Acme", "sellerBusinessId": "b1",
+        "sellerBusinessName": "Motor Parts", "businessIds": ["b1", "b2"], "placedByUid": "u2", "items": [],
+        "currency": "PHP", "subtotal": 500, "total": 500, "orderedAt": 10_000, "confirmedAt": 11_000,
+        "orderStatus": "CONFIRMED", "fulfillmentMethod": "PICKUP",
+    },
+}
+
+
+def test_past_orders_from_each_side(monkeypatch, fake_realtime):
+    monkeypatch.setattr(activity_backfill, "orders_collection", lambda db: Query(ORDERS))
+    seller = {e.action: e.title for e in activity_backfill._orders(None, "b1")}
+    buyer = {e.action: e.title for e in activity_backfill._orders(None, "b2")}
+    assert seller == {"order.placed": "New order ORD-1 from Acme", "order.confirmed": "You accepted order ORD-1"}
+    assert buyer == {"order.placed": "You placed order ORD-1 with Motor Parts", "order.confirmed": "Motor Parts accepted your order ORD-1"}

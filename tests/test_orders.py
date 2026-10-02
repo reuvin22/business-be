@@ -45,7 +45,7 @@ def test_order_life_cycle_moves_stock(client):
     assert order["orderStatus"] == "PENDING"
     assert order["total"] == 2400
 
-    # Seller confirms: 20 reserved
+    # Seller accepts: the 20 are taken out right away
     login_as("owner@test.com")
     assert [o["id"] for o in client.get(f"/api/v1/businesses/{seller_id}/orders?side=selling").json()] == [order["id"]]
     response = client.post(
@@ -54,9 +54,9 @@ def test_order_life_cycle_moves_stock(client):
     )
     assert response.status_code == 200, response.text
     stock = stock_of(client, seller_id)
-    assert (stock["quantity"], stock["reservedQuantity"], stock["availableQuantity"]) == (100, 20, 80)
+    assert (stock["quantity"], stock["reservedQuantity"], stock["availableQuantity"]) == (80, 0, 80)
 
-    # Seller ships: stock goes down
+    # Seller ships: the stock was already taken out when accepting
     client.post(f"/api/v1/businesses/{seller_id}/orders/{order['id']}/status", json={"status": "SHIPPED"})
     stock = stock_of(client, seller_id)
     assert (stock["quantity"], stock["reservedQuantity"]) == (80, 0)
@@ -93,7 +93,7 @@ def test_cannot_confirm_without_enough_stock(client):
     assert "Not enough" in response.json()["detail"]
 
 
-def test_cancelling_a_confirmed_order_releases_stock(client):
+def test_cancelling_an_accepted_order_puts_the_stock_back(client):
     seller_id, buyer_id, product_id, location_id = setup_seller_and_buyer(client)
     order = client.post(f"/api/v1/businesses/{buyer_id}/orders", json=order_body(seller_id, product_id, 30)).json()
 
@@ -103,7 +103,7 @@ def test_cancelling_a_confirmed_order_releases_stock(client):
     client.post(url, json={"status": "CANCELLED", "reason": "Out of trucks"})
 
     stock = stock_of(client, seller_id)
-    assert (stock["reservedQuantity"], stock["availableQuantity"]) == (0, 100)
+    assert (stock["quantity"], stock["reservedQuantity"], stock["availableQuantity"]) == (100, 0, 100)
 
 
 def test_customer_price_is_used_for_that_buyer(client):
