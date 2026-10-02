@@ -107,14 +107,6 @@ def _open_with(db: Client, access: BusinessAccess, other_id: str) -> str:
     return ref.id
 
 
-def send_order_message(db: Client, access: BusinessAccess, order) -> None:
-    """When a buyer places an order: a message to the seller, with the order as a card, asking them to confirm it.
-    Sent by the system for the buyer (placing an order is enough, no messaging permission needed)."""
-    conversation_id = _open_with(db, access, order.seller_business_id)
-    text = f"Hi {order.seller_business_name}! I placed order {order.order_number}. Please confirm this order."
-    _send(db, access, conversation_id, MessageIn(message=text, order_id=order.id))
-
-
 def send_message(db: Client, access: BusinessAccess, conversation_id: str, message_in: MessageIn) -> Message:
     access.require(Permission.SEND_MESSAGES)
     return _send(db, access, conversation_id, message_in)

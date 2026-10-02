@@ -14,7 +14,6 @@ Both businesses are notified of every step (activity history + the bell).
 """
 
 import datetime
-import logging
 from collections import defaultdict
 
 from google.cloud import firestore
@@ -22,7 +21,6 @@ from google.cloud.firestore import Client, DocumentReference, FieldFilter, Trans
 
 from app.controllers import activity_controller, crud
 from app.controllers.business_controller import find_business
-from app.controllers.conversation_controller import send_order_message
 from app.controllers.crud import bad_request, forbidden, not_found
 from app.controllers.customer_price_controller import list_prices_for_customer
 from app.controllers.delivery_zone_controller import list_delivery_zones
@@ -54,7 +52,6 @@ from app.schemas.payment import PaymentInstructions, payment_kind
 from app.schemas.views import OrderView
 from app.utils.helpers import current_time_ms
 
-logger = logging.getLogger(__name__)
 
 # Which status changes each side may make: {current status: [allowed next statuses]}
 SELLER_CHANGES = {
@@ -217,11 +214,6 @@ def create_order(db: Client, access: BusinessAccess, order_in: OrderIn) -> Order
         mine=f"You placed order {order.order_number} with {seller.business_name}",
         theirs=f"New order {order.order_number} from {access.business.business_name}",
     )
-    # The seller also gets a message with the order, asking them to confirm it (the order is placed either way)
-    try:
-        send_order_message(db, access, order)
-    except Exception:
-        logger.exception("Could not send the message for order %s", order.order_number)
     return order
 
 
