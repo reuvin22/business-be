@@ -345,6 +345,25 @@ class PosPaymentType(StrEnum):
     BANK_TRANSFER = "BANK_TRANSFER"
 
 
+class PosTemplate(StrEnum):
+    """How the selling app looks and what it asks, for the kind of business. Products, prices, stock,
+    and receipts work the same in every template."""
+
+    DEFAULT = "DEFAULT"  # retail: product tiles with photos and stock
+    GROCERY = "GROCERY"  # a compact list made for scanning
+    RESTAURANT = "RESTAURANT"  # a menu by category; dine-in (table number), take-out, delivery
+    COFFEE_SHOP = "COFFEE_SHOP"  # a menu by category; sizes on each drink; the customer's name
+    CUSTOM = "CUSTOM"  # the business switches each feature on or off itself (PosSettingsIn.custom)
+
+
+class OrderType(StrEnum):
+    """Restaurants and coffee shops: how the order is served."""
+
+    DINE_IN = "DINE_IN"
+    TAKE_OUT = "TAKE_OUT"
+    DELIVERY = "DELIVERY"
+
+
 class OnlinePaymentStatus(StrEnum):
     """An online payment at the counter (Xendit), from the QR code to the receipt."""
 

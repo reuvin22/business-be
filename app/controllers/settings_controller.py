@@ -10,6 +10,7 @@ from app.models.settings import (
     DeliverySettings,
     LegalInfo,
     PaymentTerms,
+    PosSettings,
     ReturnPolicy,
     SupplierProfile,
     settings_document,
@@ -19,6 +20,7 @@ from app.schemas.enums import Permission
 from app.schemas.legal import LegalIn
 from app.schemas.payment import PaymentTermsIn
 from app.schemas.policies import ReturnPolicyIn, SupplierProfileIn
+from app.schemas.pos import PosSettingsIn
 
 # ---- Legal & registration (private: team only) ---------------------------------------------
 
@@ -83,3 +85,15 @@ def save_supplier_profile(db: Client, access: BusinessAccess, profile_in: Suppli
     # Copied onto the business so the directory can filter by capability without extra reads
     business_document(db, access.business_id).update({"capabilities": profile_in.enabled_capabilities()})
     return profile
+
+
+# ---- Selling app (its template) ----------------------------------------------------------
+
+
+def get_pos_settings(db: Client, business_id: str) -> PosSettings:
+    return crud.get_single_document(settings_document(db, business_id, "pos"), PosSettings)
+
+
+def save_pos_settings(db: Client, access: BusinessAccess, settings_in: PosSettingsIn) -> PosSettings:
+    access.require(Permission.EDIT_BUSINESS)
+    return crud.save_single_document(settings_document(db, access.business_id, "pos"), PosSettings, settings_in)

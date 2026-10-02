@@ -1,7 +1,7 @@
 """Business details that exist once per business (not lists).
 
 Firestore location:  businesses/{businessId}/settings/{name}
-where name is "legal", "delivery", "paymentTerms", "returnPolicy", or "supplierProfile".
+where name is "legal", "delivery", "paymentTerms", "returnPolicy", "supplierProfile", or "pos".
 """
 
 from google.cloud.firestore import Client, DocumentReference
@@ -13,6 +13,11 @@ from app.schemas.enums import VerificationStatus
 from app.schemas.legal import LegalIn
 from app.schemas.payment import PaymentTermsIn
 from app.schemas.policies import ReturnPolicyIn, SupplierProfileIn
+from app.schemas.pos import PosSettingsIn
+
+
+class PosSettings(PosSettingsIn, FirestoreModel):
+    pass
 
 
 class LegalInfo(LegalIn, FirestoreModel):

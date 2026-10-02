@@ -1,11 +1,12 @@
 """The selling app (my-business-pos): seller accounts, checkout, receipts, and stock changes."""
 
 import datetime
+from typing import Literal
 
 from pydantic import Field, field_validator, model_validator
 
 from app.schemas.base import CamelModel, EmailText
-from app.schemas.enums import MemberStatus, PosPaymentType
+from app.schemas.enums import MemberStatus, OrderType, PosPaymentType, PosTemplate
 
 # ---- Seller accounts (managed from the main app's Team page) ---------------------------------
 
@@ -47,6 +48,10 @@ class CheckoutIn(CamelModel):
     amount_paid: float | None = Field(default=None, ge=0)  # empty = exactly the total
     note: str = ""
     date: datetime.date  # the seller's local date, so "today's sales" match their day
+    # Restaurants and coffee shops (see PosTemplate); empty for a normal shop
+    order_type: OrderType | None = None
+    table_number: str = Field(default="", max_length=20)
+    customer_name: str = Field(default="", max_length=60)
 
 
 class VoidIn(CamelModel):
@@ -106,6 +111,7 @@ class PosProduct(CamelModel):
     unit: str = "pcs"
     image_url: str = ""
     category_id: str | None = None
+    category_name: str = ""  # for the menu tabs of a restaurant or coffee shop
     variants: list[PosVariant] = []
     prices: list[PosPrice] = []
 
@@ -134,3 +140,38 @@ class PosContext(CamelModel):
     locations: list[PosLocation]  # a seller with a store sees only that one
     # True when e-wallet, card, and bank transfer are paid online through Xendit (a QR code at the till)
     online_payments: bool = False
+    template: PosTemplate = PosTemplate.DEFAULT  # chosen by the business on the main app's Team page
+    custom: "PosCustomTemplate | None" = None  # the business's own settings, when template is CUSTOM
+
+
+class PosCustomTemplate(CamelModel):
+    """A template the business makes itself: the same switches the built-in templates are made of
+    (the selling app's src/utils/templates.ts)."""
+
+    name: str = Field(default="My own", max_length=40)  # e.g. "Milk tea shop"
+    layout: Literal["tiles", "list"] = "tiles"  # big tiles, or a compact list made for scanning
+    photos: bool = True  # product photos on the tiles (otherwise big names, like a menu board)
+    category_tabs: bool = False  # a tab per product category (a menu)
+    variant_buttons: bool = False  # one card per product, with a button per variant (e.g. sizes)
+    stock: Literal["always", "low"] = "always"  # stock left on every product, or only when it runs low
+    scan_first: bool = False  # after a tap or scan, the search box is ready for the next barcode
+    order_types: list[OrderType] = []  # how orders are served (empty: not asked)
+    table_number: bool = False  # ask a table number for dine-in
+    customer_name: bool = False  # ask the customer's name, to call them when ready
+
+    @model_validator(mode="after")
+    def clean(self):
+        self.order_types = list(dict.fromkeys(self.order_types))  # each once, in the order chosen
+        if OrderType.DINE_IN not in self.order_types:
+            self.table_number = False  # a table only makes sense for dine-in
+        return self
+
+
+class PosSettingsIn(CamelModel):
+    """The business's choices for the selling app (main app, Team page)."""
+
+    template: PosTemplate = PosTemplate.DEFAULT
+    custom: PosCustomTemplate = PosCustomTemplate()  # kept even while a built-in template is in use
+
+
+PosContext.model_rebuild()  # it names PosCustomTemplate, defined below it

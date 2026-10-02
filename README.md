@@ -148,6 +148,13 @@ A separate web app for selling at the counter, on the main business's own produc
 - **Selling:** `POST /businesses/{id}/pos/checkouts`. The server works out the prices (RETAIL tiers win when a
   product has them), checks the stock, and in one transaction takes it out, saves the receipt
   (`businesses/{id}/receipts`), one Sale per line, and the stock history. Voiding a receipt puts the stock back.
+- **Templates:** each business picks how its till looks (main app → Team → *Selling app template*;
+  `GET/PUT /businesses/{id}/pos-settings`, saved in `settings/pos`): **Default** (retail tiles), **Grocery**
+  (a list made for scanning), **Restaurant** (menu tabs; dine-in with a table number, take-out, delivery), or
+  **Coffee shop** (menu tabs; sizes from variants as buttons; the customer's name). Or **Customize your own**:
+  the business switches each feature on or off itself (layout, photos, category tabs, size buttons, when stock
+  shows, scan-ready search, order types, table number, customer's name), starting from any built-in template. Products, prices, stock, and
+  receipts work the same in all of them; receipts keep `orderType`, `tableNumber`, and `customerName`.
 - **Payments:** cash or e-wallet. Card and bank transfer are no longer accepted for new sales (older receipts keep them).
 - **Receipts:** `GET /businesses/{id}/pos/receipts?date=YYYY-MM-DD`, or without `date` for all dates (the newest 500).
 - **Stock in / out:** `POST /businesses/{id}/pos/stock-changes` (+ delivery received, − damaged with a reason). The selling app

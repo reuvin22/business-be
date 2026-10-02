@@ -5,18 +5,20 @@ import datetime
 from fastapi import APIRouter, Depends, status
 from google.cloud.firestore import Client
 
-from app.controllers import pos_controller, seller_controller
+from app.controllers import pos_controller, seller_controller, settings_controller
 from app.core.firebase import get_db
 from app.dependencies.auth import get_current_user
 from app.dependencies.business_access import BusinessAccess, get_business_access, get_pos_access
 from app.models.inventory import InventoryItem, StockMovement
 from app.models.member import Member
 from app.models.pos import OnlinePaymentView, Receipt
+from app.models.settings import PosSettings
 from app.schemas.pos import (
     CheckoutIn,
     PosBusiness,
     PosContext,
     PosProduct,
+    PosSettingsIn,
     SellerCreateIn,
     SellerPasswordIn,
     SellerUpdateIn,
@@ -28,6 +30,19 @@ from app.schemas.user import CurrentUser
 router = APIRouter(tags=["Selling app"])
 
 # ---- Seller accounts (used by the main app's Team page) -------------------------------------
+
+
+@router.get("/businesses/{business_id}/pos-settings", response_model=PosSettings)
+def get_pos_settings(db: Client = Depends(get_db), access: BusinessAccess = Depends(get_business_access)):
+    """The selling app's template (Default, Grocery, Restaurant, Coffee shop)."""
+    return settings_controller.get_pos_settings(db, access.business_id)
+
+
+@router.put("/businesses/{business_id}/pos-settings", response_model=PosSettings)
+def save_pos_settings(
+    settings_in: PosSettingsIn, db: Client = Depends(get_db), access: BusinessAccess = Depends(get_business_access)
+):
+    return settings_controller.save_pos_settings(db, access, settings_in)
 
 
 @router.get("/businesses/{business_id}/sellers", response_model=list[Member])

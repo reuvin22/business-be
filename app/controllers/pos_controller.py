@@ -12,7 +12,8 @@ from fastapi import HTTPException
 from google.cloud import firestore
 from google.cloud.firestore import Client, DocumentReference, FieldFilter, Transaction
 
-from app.controllers import crud
+from app.controllers import crud, settings_controller
+from app.controllers.category_controller import list_categories
 from app.controllers.crud import bad_request, forbidden, not_found
 from app.controllers.inventory_controller import (
     StockNames,
@@ -48,6 +49,7 @@ from app.schemas.enums import (
     OnlinePaymentStatus,
     Permission,
     PosPaymentType,
+    PosTemplate,
     PriceType,
     ProductStatus,
     ReceiptStatus,
@@ -112,8 +114,15 @@ def get_context(db: Client, access: BusinessAccess) -> PosContext:
         role=access.member.role,
         can_void_any=access.can(Permission.MANAGE_INVENTORY),
         online_payments=settings.xendit_configured,
+        **_template(settings_controller.get_pos_settings(db, access.business_id)),
         locations=[PosLocation(id=location.id, location_name=location.location_name) for location in locations],
     )
+
+
+def _template(pos_settings) -> dict:
+    """The template for the till; the business's own switches come along only when it uses them."""
+    custom = pos_settings.template == PosTemplate.CUSTOM
+    return {"template": pos_settings.template, "custom": pos_settings.custom if custom else None}
 
 
 def get_catalog(db: Client, access: BusinessAccess, today: datetime.date) -> list[PosProduct]:
@@ -122,12 +131,18 @@ def get_catalog(db: Client, access: BusinessAccess, today: datetime.date) -> lis
     The whole catalog is cached as one entry (per day, since prices can start or end on a date), so
     opening the selling app is one cache read instead of one per product. It is part of the business's
     cache, so changing a product, variant, price, or the business itself makes it outdated."""
-    return cache.cached_models(
+    catalog = cache.cached_models(
         cache.business_scope(access.business_id),
         f"pos-catalog:{today.isoformat()}",
         PosProduct,
         lambda: _build_catalog(db, access, today),
     )
+    # Category names are shared by every business (and cached on their own): added here, so a renamed
+    # category shows at once without rebuilding every catalog
+    names = {category.id: category.category_name for category in list_categories(db)}
+    for product in catalog:
+        product.category_name = names.get(product.category_id or "", "")
+    return catalog
 
 
 def _build_catalog(db: Client, access: BusinessAccess, today: datetime.date) -> list[PosProduct]:
@@ -305,6 +320,9 @@ def checkout(
         change_given=round(amount_paid - total, 2),
         payment_method=checkout_in.payment_method,
         payment_reference=payment_reference,
+        order_type=checkout_in.order_type,
+        table_number=checkout_in.table_number.strip(),
+        customer_name=checkout_in.customer_name.strip(),
         note=checkout_in.note,
         seller_uid=access.user.uid,
         seller_name=_seller_name(access),

@@ -3,7 +3,7 @@ from google.cloud.firestore import Client, CollectionReference
 from app.models.base import FirestoreModel
 from app.models.business import business_subcollection
 from app.schemas.base import CamelModel
-from app.schemas.enums import OnlinePaymentStatus, PosPaymentType, ReceiptStatus
+from app.schemas.enums import OnlinePaymentStatus, OrderType, PosPaymentType, ReceiptStatus
 from app.schemas.pos import CheckoutIn
 
 # Firestore location:  businesses/{businessId}/receipts/{receiptId}
@@ -42,6 +42,9 @@ class Receipt(FirestoreModel):
     voided_by_name: str = ""
     void_reason: str = ""
     payment_reference: str = ""  # online payments: Xendit's payment id
+    order_type: OrderType | None = None  # restaurants and coffee shops
+    table_number: str = ""
+    customer_name: str = ""
 
 
 def receipts_collection(db: Client, business_id: str) -> CollectionReference:
