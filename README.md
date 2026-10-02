@@ -181,6 +181,31 @@ Setup (once):
 3. **Deploy the rules** (they block everything until then, and the page says "Live updates are off"):
    `npx firebase-tools deploy --only database --project <your-project-id>`
 
+## Online payments in the selling app (Xendit)
+
+With `XENDIT_SECRET_KEY` set, the till offers **Cash, E-wallet, Card, Bank transfer**. The last three are paid
+online through a Xendit Payment Session (`app/core/xendit.py`):
+1. The seller taps Charge. `POST /businesses/{id}/pos/payments` prices the cart (same prices as a cash sale),
+   checks the stock, and creates a Xendit payment page for the exact total. Nothing is sold yet.
+2. The till shows the page as a **QR code**. The customer scans it and pays on their phone (GCash, Maya, GrabPay,
+   ShopeePay, QR Ph / any card / BPI or UnionBank). For cards, the page can also be opened on the till.
+3. The till asks `GET /businesses/{id}/pos/payments/{paymentId}` every 3 seconds. When Xendit says the session is
+   COMPLETED, the cart is sold exactly like a cash sale (stock out, receipt, sales, stock history). The receipt
+   gets the payment's id, so it is never saved twice, and Xendit's payment id is kept on it (`paymentReference`).
+4. The **webhook** `POST /api/v1/webhooks/xendit` does the same when the till is closed. It checks the
+   `x-callback-token` header, then asks Xendit for the real status before selling anything.
+
+If the customer pays but the sale can no longer be saved (e.g. the last item was sold meanwhile), the payment is
+marked `PAID_NOT_SAVED` with the reason: record it by hand or refund it in the Xendit Dashboard.
+Without `XENDIT_SECRET_KEY`, the till offers Cash and E-wallet (the seller checks the customer's phone), as before.
+
+Setup:
+1. Xendit Dashboard → Settings → Developers → **API keys**: a secret key with *Money-in* write permission.
+   Test keys start with `xnd_development_` (no real money); live keys with `xnd_production_`.
+2. Settings → Developers → **Webhooks**: set the Payment Session URL to `https://<your-api>/api/v1/webhooks/xendit`
+   and copy the **verification token**.
+3. Set `XENDIT_SECRET_KEY` and `XENDIT_WEBHOOK_TOKEN` in `.env` and on Render. Never put the secret key in a frontend.
+
 ## Activity history and notifications
 
 Product changes (added, updated, deleted), messages received from other businesses, and connection events

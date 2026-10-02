@@ -345,6 +345,16 @@ class PosPaymentType(StrEnum):
     BANK_TRANSFER = "BANK_TRANSFER"
 
 
+class OnlinePaymentStatus(StrEnum):
+    """An online payment at the counter (Xendit), from the QR code to the receipt."""
+
+    PENDING = "PENDING"  # waiting for the customer to pay
+    COMPLETED = "COMPLETED"  # paid, and the sale is saved (receipt_id)
+    PAID_NOT_SAVED = "PAID_NOT_SAVED"  # paid, but the sale could not be saved (e.g. stock ran out): check it
+    EXPIRED = "EXPIRED"
+    CANCELED = "CANCELED"
+
+
 class ReceiptStatus(StrEnum):
     COMPLETED = "COMPLETED"
     VOIDED = "VOIDED"  # undone; the stock was put back

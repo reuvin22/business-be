@@ -71,6 +71,12 @@ def get_pos_access(
     return access
 
 
+def load_access(db: Client, business_id: str, user: CurrentUser) -> BusinessAccess:
+    """Any user's access to a business, outside a request (e.g. finishing a sale when Xendit reports
+    a payment). Stops with 404 when they are no longer an active member."""
+    return _load_access(db, business_id, user)
+
+
 def _load_access(db: Client, business_id: str, user: CurrentUser) -> BusinessAccess:
     not_found = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Business not found")
 

@@ -22,6 +22,7 @@ from app.routes import (
     profile_routes,
     pos_routes,
     upload_routes,
+    webhook_routes,
 )
 
 # Every route is versioned: /api/v1/... When a breaking change is needed, add /api/v2
@@ -125,5 +126,6 @@ for router_module in (
     pos_routes,
     upload_routes,
     admin_routes,
+    webhook_routes,
 ):
     app.include_router(router_module.router, prefix=API_V1_PREFIX)

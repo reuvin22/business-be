@@ -11,7 +11,7 @@ from app.dependencies.auth import get_current_user
 from app.dependencies.business_access import BusinessAccess, get_business_access, get_pos_access
 from app.models.inventory import InventoryItem, StockMovement
 from app.models.member import Member
-from app.models.pos import Receipt
+from app.models.pos import OnlinePaymentView, Receipt
 from app.schemas.pos import (
     CheckoutIn,
     PosBusiness,
@@ -135,3 +135,31 @@ def void_receipt(
 def delete_receipt(receipt_id: str, db: Client = Depends(get_db), access: BusinessAccess = Depends(get_pos_access)):
     """Managers only: removes the receipt and its sales for good (stock goes back unless it was voided)."""
     pos_controller.delete_receipt(db, access, receipt_id)
+
+
+# ---- Online payments (Xendit) ----------------------------------------------------------------
+
+
+@router.post(
+    "/businesses/{business_id}/pos/payments", response_model=OnlinePaymentView, status_code=status.HTTP_201_CREATED
+)
+def start_online_payment(
+    checkout_in: CheckoutIn, db: Client = Depends(get_db), access: BusinessAccess = Depends(get_pos_access)
+):
+    """E-wallet, card, or bank transfer: makes a Xendit payment page for the cart (show it as a QR code).
+    The sale is saved when the customer has paid."""
+    return pos_controller.start_online_payment(db, access, checkout_in)
+
+
+@router.get("/businesses/{business_id}/pos/payments/{payment_id}", response_model=OnlinePaymentView)
+def get_online_payment(payment_id: str, db: Client = Depends(get_db), access: BusinessAccess = Depends(get_pos_access)):
+    """Ask every few seconds while the QR code is shown: once paid, the receipt comes with it."""
+    return pos_controller.get_online_payment(db, access, payment_id)
+
+
+@router.post("/businesses/{business_id}/pos/payments/{payment_id}/cancel", response_model=OnlinePaymentView)
+def cancel_online_payment(
+    payment_id: str, db: Client = Depends(get_db), access: BusinessAccess = Depends(get_pos_access)
+):
+    return pos_controller.cancel_online_payment(db, access, payment_id)
+

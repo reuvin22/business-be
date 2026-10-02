@@ -8,6 +8,7 @@ Both apps listen to the inventory in Firestore, so they see each other's changes
 import datetime
 from dataclasses import dataclass
 
+from fastapi import HTTPException
 from google.cloud import firestore
 from google.cloud.firestore import Client, DocumentReference, FieldFilter, Transaction
 
@@ -23,12 +24,20 @@ from app.controllers.inventory_controller import (
 )
 from app.controllers.pricing import is_current
 from app.controllers.product_controller import get_product, list_all_prices, list_all_variants, list_prices, list_products
-from app.core import cache
-from app.dependencies.business_access import BusinessAccess
+from app.core import cache, xendit
+from app.core.config import settings
+from app.dependencies.business_access import BusinessAccess, load_access
 from app.models.business import Business, businesses_collection
 from app.models.inventory import InventoryItem, StockMovement, inventory_collection, inventory_document
 from app.models.member import Member, members_collection
-from app.models.pos import Receipt, ReceiptLine, receipts_collection
+from app.models.pos import (
+    OnlinePayment,
+    OnlinePaymentView,
+    Receipt,
+    ReceiptLine,
+    online_payments_collection,
+    receipts_collection,
+)
 from app.models.product import Price, Product, Variant, variants_collection
 from app.models.profile import Location, locations_collection
 from app.models.trade import Sale, sales_collection
@@ -36,6 +45,7 @@ from app.schemas.enums import (
     ActiveStatus,
     MemberRole,
     MemberStatus,
+    OnlinePaymentStatus,
     Permission,
     PosPaymentType,
     PriceType,
@@ -101,6 +111,7 @@ def get_context(db: Client, access: BusinessAccess) -> PosContext:
         seller_name=access.member.display_name or access.user.name or access.user.email or "",
         role=access.member.role,
         can_void_any=access.can(Permission.MANAGE_INVENTORY),
+        online_payments=settings.xendit_configured,
         locations=[PosLocation(id=location.id, location_name=location.location_name) for location in locations],
     )
 
@@ -251,9 +262,62 @@ class _Line:
     stock_ref: DocumentReference
 
 
-def checkout(db: Client, access: BusinessAccess, checkout_in: CheckoutIn) -> Receipt:
+def checkout(
+    db: Client,
+    access: BusinessAccess,
+    checkout_in: CheckoutIn,
+    *,
+    receipt_id: str | None = None,
+    payment_reference: str = "",
+    paid_online: bool = False,
+) -> Receipt:
     """Sells everything in the cart at once: works out the prices and the total, takes the stock
-    out, and saves the receipt, its sales, and the stock history. All or nothing."""
+    out, and saves the receipt, its sales, and the stock history. All or nothing.
+
+    receipt_id: a fixed id (online payments use the payment's id). Saving the same id twice
+    returns the receipt that is already there instead of selling again.
+    paid_online: the money already arrived through Xendit (see complete_online_payment)."""
+    method = checkout_in.payment_method
+    if not paid_online and method != PosPaymentType.CASH:
+        # Without Xendit, an e-wallet payment is confirmed by the seller (they see it on the customer's phone)
+        if settings.xendit_configured or method != PosPaymentType.E_WALLET:
+            raise bad_request("E-wallet, card, and bank transfer are paid online: use the QR code")
+
+    receipt_ref = receipts_collection(db, access.business_id).document(receipt_id)
+    location, lines, receipt_number, now = _price_cart(db, access, checkout_in, receipt_ref)
+
+    total = round(sum(line.receipt_line.line_total for line in lines), 2)
+    amount_paid = total if checkout_in.amount_paid is None else round(checkout_in.amount_paid, 2)
+    if amount_paid < total:
+        raise bad_request(f"The amount paid is less than the total ({total:,.2f})")
+    if checkout_in.payment_method != PosPaymentType.CASH and amount_paid != total:
+        raise bad_request("Only cash payments can have change")
+
+    receipt = Receipt(
+        id=receipt_ref.id,
+        receipt_number=receipt_number,
+        date=checkout_in.date.isoformat(),
+        location_id=location.id,
+        location_name=location.location_name,
+        items=[line.receipt_line for line in lines],
+        total=total,
+        amount_paid=amount_paid,
+        change_given=round(amount_paid - total, 2),
+        payment_method=checkout_in.payment_method,
+        payment_reference=payment_reference,
+        note=checkout_in.note,
+        seller_uid=access.user.uid,
+        seller_name=_seller_name(access),
+        created_at=now,
+        updated_at=now,
+    )
+    return _save_checkout(db.transaction(), db, access, receipt_ref, receipt, lines, location)
+
+
+def _price_cart(
+    db: Client, access: BusinessAccess, checkout_in: CheckoutIn, receipt_ref: DocumentReference
+) -> tuple[Location, list[_Line], str, int]:
+    """The cart's lines with today's counter prices (nothing is saved yet)."""
     location = _get_location(db, access, checkout_in.location_id)
     currency = access.business.currency
 
@@ -264,7 +328,6 @@ def checkout(db: Client, access: BusinessAccess, checkout_in: CheckoutIn) -> Rec
         quantities[key] = quantities.get(key, 0) + item.quantity
 
     now = current_time_ms()
-    receipt_ref = receipts_collection(db, access.business_id).document()
     receipt_number = f"{checkout_in.date:%Y%m%d}-{receipt_ref.id[:6].upper()}"
 
     lines: list[_Line] = []
@@ -314,31 +377,7 @@ def checkout(db: Client, access: BusinessAccess, checkout_in: CheckoutIn) -> Rec
             )
         )
 
-    total = round(sum(line.receipt_line.line_total for line in lines), 2)
-    amount_paid = total if checkout_in.amount_paid is None else round(checkout_in.amount_paid, 2)
-    if amount_paid < total:
-        raise bad_request(f"The amount paid is less than the total ({total:,.2f})")
-    if checkout_in.payment_method != PosPaymentType.CASH and amount_paid != total:
-        raise bad_request("Only cash payments can have change")
-
-    receipt = Receipt(
-        id=receipt_ref.id,
-        receipt_number=receipt_number,
-        date=checkout_in.date.isoformat(),
-        location_id=location.id,
-        location_name=location.location_name,
-        items=[line.receipt_line for line in lines],
-        total=total,
-        amount_paid=amount_paid,
-        change_given=round(amount_paid - total, 2),
-        payment_method=checkout_in.payment_method,
-        note=checkout_in.note,
-        seller_uid=access.user.uid,
-        seller_name=_seller_name(access),
-        created_at=now,
-        updated_at=now,
-    )
-    return _save_checkout(db.transaction(), db, access, receipt_ref, receipt, lines, location)
+    return location, lines, receipt_number, now
 
 
 @firestore.transactional
@@ -352,6 +391,9 @@ def _save_checkout(
     location: Location,
 ) -> Receipt:
     # A transaction must read everything before it writes anything
+    saved = receipt_ref.get(transaction=transaction)
+    if saved.exists:
+        return Receipt.from_snapshot(saved)  # already sold (e.g. the webhook and the till both finished it)
     snapshots = [line.stock_ref.get(transaction=transaction) for line in lines]
 
     writes = []
@@ -565,3 +607,152 @@ def _get_variant(db: Client, business_id: str, product: Product, variant_id: str
     if variant is None or variant.status != ActiveStatus.ACTIVE:
         raise bad_request(f"That variant of {product.product_name} is not for sale")
     return variant
+
+
+# ---- Online payments (Xendit: e-wallet, card, bank transfer) --------------------------------
+
+
+def start_online_payment(db: Client, access: BusinessAccess, checkout_in: CheckoutIn) -> OnlinePaymentView:
+    """Prices the cart and makes a Xendit payment page for the exact total (shown as a QR code).
+    Nothing is sold yet: the sale is saved when the payment arrives (complete_online_payment)."""
+    if not settings.xendit_configured:
+        raise bad_request("Online payments are not set up on the server (XENDIT_SECRET_KEY)")
+    method = checkout_in.payment_method
+    if method not in xendit.CHANNELS:
+        raise bad_request("Choose e-wallet, card, or bank transfer")
+    currency = access.business.currency
+    if currency != "PHP":
+        raise bad_request("Online payments are only available in PHP")
+
+    payment_ref = online_payments_collection(db, access.business_id).document()
+    # The receipt will get the payment's id, so price the cart with it
+    receipt_ref = receipts_collection(db, access.business_id).document(payment_ref.id)
+    location, lines, _, now = _price_cart(db, access, checkout_in, receipt_ref)
+    total = round(sum(line.receipt_line.line_total for line in lines), 2)
+    if total < xendit.MINIMUM_AMOUNT[method]:
+        raise bad_request(f"The smallest amount for this way of paying is {xendit.MINIMUM_AMOUNT[method]:,.2f} PHP")
+    # Before the customer pays: is everything still on the shelf?
+    for line in lines:
+        snapshot = line.stock_ref.get()
+        available = InventoryItem.from_snapshot(snapshot).available_quantity if snapshot.exists else 0
+        if line.receipt_line.quantity > available:
+            raise bad_request(f"Only {available:g} of {line.receipt_line.product_name} left at {location.location_name}")
+
+    session = xendit.create_session(
+        reference_id=f"{access.business_id}_{payment_ref.id}",
+        amount=total,
+        currency=currency,
+        method=method,
+        description=f"{access.business.business_name}, {location.location_name}",
+        customer_reference=f"walkin{payment_ref.id}",
+    )
+    payment = OnlinePayment(
+        id=payment_ref.id,
+        checkout=checkout_in.model_copy(update={"amount_paid": None}),
+        payment_method=method,
+        total=total,
+        currency=currency,
+        session_id=session.get("payment_session_id", ""),
+        payment_link_url=session.get("payment_link_url", ""),
+        seller_uid=access.user.uid,
+        seller_name=_seller_name(access),
+        created_at=now,
+        updated_at=now,
+    )
+    payment_ref.set(payment.to_firestore())
+    return OnlinePaymentView(**payment.model_dump())
+
+
+def get_online_payment(db: Client, access: BusinessAccess, payment_id: str) -> OnlinePaymentView:
+    """The payment now. While it is waiting, Xendit is asked, and a paid cart is sold right away."""
+    payment = _find_payment(db, access, payment_id)
+    if payment.status == OnlinePaymentStatus.PENDING:
+        payment = sync_online_payment(db, access.business_id, payment)
+    return _payment_view(db, access.business_id, payment)
+
+
+def cancel_online_payment(db: Client, access: BusinessAccess, payment_id: str) -> OnlinePaymentView:
+    """The customer changed their mind. If they had already paid, the sale is saved instead."""
+    payment = _find_payment(db, access, payment_id)
+    if payment.status == OnlinePaymentStatus.PENDING:
+        xendit.cancel_session(payment.session_id)
+        payment = sync_online_payment(db, access.business_id, payment)
+        if payment.status == OnlinePaymentStatus.PENDING:
+            payment = _set_status(db, access.business_id, payment, OnlinePaymentStatus.CANCELED)
+    return _payment_view(db, access.business_id, payment)
+
+
+def handle_xendit_webhook(db: Client, payload: dict) -> None:
+    """Xendit says a payment page was paid or expired. We ask Xendit ourselves before selling anything,
+    so only the real status counts (the webhook only tells us when to look)."""
+    if payload.get("event") not in ("payment_session.completed", "payment_session.expired"):
+        return
+    business_id, _, payment_id = str((payload.get("data") or {}).get("reference_id", "")).partition("_")
+    if not business_id or not payment_id:
+        return
+    snapshot = online_payments_collection(db, business_id).document(payment_id).get()
+    if snapshot.exists:
+        payment = OnlinePayment.from_snapshot(snapshot)
+        if payment.status == OnlinePaymentStatus.PENDING:
+            sync_online_payment(db, business_id, payment)
+
+
+def sync_online_payment(db: Client, business_id: str, payment: OnlinePayment) -> OnlinePayment:
+    """Brings the payment up to date with Xendit: sells the cart when paid, or marks it expired."""
+    session = xendit.get_session(payment.session_id)
+    status = session.get("status")
+    if status == "COMPLETED":
+        return complete_online_payment(db, business_id, payment, session.get("payment_id") or "")
+    if status == "EXPIRED":
+        return _set_status(db, business_id, payment, OnlinePaymentStatus.EXPIRED)
+    if status == "CANCELED":
+        return _set_status(db, business_id, payment, OnlinePaymentStatus.CANCELED)
+    return payment
+
+
+def complete_online_payment(db: Client, business_id: str, payment: OnlinePayment, payment_reference: str) -> OnlinePayment:
+    """The money arrived: sell the cart as the seller who rang it up. Safe to call twice (the receipt id is fixed)."""
+    try:
+        seller = load_access(db, business_id, CurrentUser(uid=payment.seller_uid, name=payment.seller_name))
+        receipt = checkout(
+            db, seller, payment.checkout, receipt_id=payment.id, payment_reference=payment_reference, paid_online=True
+        )
+        payment.status = OnlinePaymentStatus.COMPLETED
+        payment.receipt_id = receipt.id
+    except HTTPException as error:
+        # The customer paid, but e.g. the last item was sold meanwhile: someone must sort it out by hand
+        payment.status = OnlinePaymentStatus.PAID_NOT_SAVED
+        payment.error = f"{error.detail}. The customer has paid: record the sale by hand or refund it in Xendit."
+    payment.payment_reference = payment_reference
+    payment.updated_at = current_time_ms()
+    online_payments_collection(db, business_id).document(payment.id).set(payment.to_firestore())
+    cache.bump(cache.stock_scope(business_id))  # the stock and receipts changed (no API route did it)
+    return payment
+
+
+def _find_payment(db: Client, access: BusinessAccess, payment_id: str) -> OnlinePayment:
+    snapshot = online_payments_collection(db, access.business_id).document(payment_id).get()
+    if not snapshot.exists:
+        raise not_found("Payment")
+    payment = OnlinePayment.from_snapshot(snapshot)
+    if payment.seller_uid != access.user.uid and not access.can(Permission.MANAGE_INVENTORY):
+        raise not_found("Payment")
+    return payment
+
+
+def _set_status(db: Client, business_id: str, payment: OnlinePayment, status: OnlinePaymentStatus) -> OnlinePayment:
+    payment.status = status
+    payment.updated_at = current_time_ms()
+    online_payments_collection(db, business_id).document(payment.id).update(
+        {"status": status.value, "updatedAt": payment.updated_at}
+    )
+    return payment
+
+
+def _payment_view(db: Client, business_id: str, payment: OnlinePayment) -> OnlinePaymentView:
+    receipt = None
+    if payment.receipt_id:
+        snapshot = receipts_collection(db, business_id).document(payment.receipt_id).get()
+        receipt = Receipt.from_snapshot(snapshot) if snapshot.exists else None
+    return OnlinePaymentView(**payment.model_dump(), receipt=receipt)
+

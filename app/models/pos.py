@@ -3,7 +3,8 @@ from google.cloud.firestore import Client, CollectionReference
 from app.models.base import FirestoreModel
 from app.models.business import business_subcollection
 from app.schemas.base import CamelModel
-from app.schemas.enums import PosPaymentType, ReceiptStatus
+from app.schemas.enums import OnlinePaymentStatus, PosPaymentType, ReceiptStatus
+from app.schemas.pos import CheckoutIn
 
 # Firestore location:  businesses/{businessId}/receipts/{receiptId}
 #
@@ -40,7 +41,40 @@ class Receipt(FirestoreModel):
     voided_at: int | None = None
     voided_by_name: str = ""
     void_reason: str = ""
+    payment_reference: str = ""  # online payments: Xendit's payment id
 
 
 def receipts_collection(db: Client, business_id: str) -> CollectionReference:
     return business_subcollection(db, business_id, "receipts")
+
+
+# Firestore location:  businesses/{businessId}/onlinePayments/{paymentId}
+#
+# A cart being paid online (Xendit). When the payment arrives, the cart is checked out and the
+# receipt gets the SAME id as this payment, so it can never be saved twice (webhook + till both asking).
+
+
+class OnlinePayment(FirestoreModel):
+    checkout: CheckoutIn  # the cart, saved as it was when the seller pressed Charge
+    payment_method: PosPaymentType
+    total: float
+    currency: str
+    status: OnlinePaymentStatus = OnlinePaymentStatus.PENDING
+    session_id: str = ""  # Xendit payment session (ps-...)
+    payment_link_url: str = ""  # the page the customer pays on (shown as a QR code)
+    payment_reference: str = ""  # Xendit's payment id, once paid
+    receipt_id: str = ""
+    error: str = ""  # why a paid sale could not be saved
+    seller_uid: str
+    seller_name: str = ""
+
+
+def online_payments_collection(db: Client, business_id: str) -> CollectionReference:
+    return business_subcollection(db, business_id, "onlinePayments")
+
+
+class OnlinePaymentView(OnlinePayment):
+    """An online payment, with its receipt once the sale is saved."""
+
+    receipt: Receipt | None = None
+

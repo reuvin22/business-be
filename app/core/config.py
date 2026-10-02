@@ -38,6 +38,16 @@ class Settings(BaseSettings):
     # The bucket's public address, e.g. https://pub-xxxx.r2.dev or https://images.yourdomain.com
     r2_public_url: str = ""
 
+    # Xendit (online payments in the selling app: e-wallets, cards, bank transfer).
+    # Dashboard > Settings > Developers > API keys (secret key, with "Money-in" write permission),
+    # and Settings > Developers > Webhooks (the verification token).
+    xendit_secret_key: str = ""
+    xendit_webhook_token: str = ""
+
+    @property
+    def xendit_configured(self) -> bool:
+        return bool(self.xendit_secret_key.strip())
+
     @property
     def r2_configured(self) -> bool:
         return all([self.r2_account_id, self.r2_access_key_id, self.r2_secret_access_key, self.r2_bucket, self.r2_public_url])

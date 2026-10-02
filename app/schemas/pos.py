@@ -38,9 +38,6 @@ class CheckoutLineIn(CamelModel):
     quantity: int = Field(ge=1)
 
 
-OFFERED_PAYMENT_TYPES = {PosPaymentType.CASH, PosPaymentType.E_WALLET}
-
-
 class CheckoutIn(CamelModel):
     """One sale at the counter: several products, paid together. The server works out the prices."""
 
@@ -50,14 +47,6 @@ class CheckoutIn(CamelModel):
     amount_paid: float | None = Field(default=None, ge=0)  # empty = exactly the total
     note: str = ""
     date: datetime.date  # the seller's local date, so "today's sales" match their day
-
-    @field_validator("payment_method")
-    @classmethod
-    def offered_payment_method(cls, value: PosPaymentType) -> PosPaymentType:
-        # Card and bank transfer are no longer offered (older receipts may still have them)
-        if value not in OFFERED_PAYMENT_TYPES:
-            raise ValueError("payment must be cash or e-wallet")
-        return value
 
 
 class VoidIn(CamelModel):
@@ -143,3 +132,5 @@ class PosContext(CamelModel):
     role: str
     can_void_any: bool  # managers can void anyone's receipt; sellers only their own, on the same day
     locations: list[PosLocation]  # a seller with a store sees only that one
+    # True when e-wallet, card, and bank transfer are paid online through Xendit (a QR code at the till)
+    online_payments: bool = False
