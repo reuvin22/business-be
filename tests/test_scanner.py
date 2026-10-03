@@ -95,3 +95,42 @@ def test_each_till_gets_only_its_own_scans(client, firestore_db):
     # Till B disconnects: its phone stops at once
     assert client.delete(f"{shop}/scanner-sessions/{b['session']['id']}", params={"till_device_id": TILL_B}).status_code == 204
     assert client.post(scans(b), json={"barcode": "4800001"}, headers={"X-Scanner-Token": token_b}).status_code == 401
+
+
+def test_register_product_is_offered_only_to_tills_that_may_manage_products(monkeypatch):
+    from types import SimpleNamespace
+
+    from app.controllers import scanner_controller
+    from app.schemas.enums import Permission
+
+    session = SimpleNamespace(till_uid="u1", till_name="Ana")
+    admin = SimpleNamespace(can=lambda permission: permission == Permission.MANAGE_PRODUCTS)
+    cashier = SimpleNamespace(can=lambda permission: False)
+    monkeypatch.setattr(scanner_controller, "_till_access", lambda db, business_id, s: admin)
+    assert scanner_controller._actions(None, "b1", session) == ["register_product"]
+    monkeypatch.setattr(scanner_controller, "_till_access", lambda db, business_id, s: cashier)
+    assert scanner_controller._actions(None, "b1", session) == []
+    monkeypatch.setattr(scanner_controller, "_till_access", lambda db, business_id, s: None)  # left the team
+    assert scanner_controller._actions(None, "b1", session) == []
+
+
+def test_registering_a_product_from_the_phone(client, firestore_db):
+    business_id = create_business(client)["id"]
+    _, location_id = create_product_with_stock(client, business_id)
+    shop = f"/api/v1/businesses/{business_id}/pos"
+    till = start(client, shop, location_id, TILL_A)  # the owner is signed in on the till
+    paired = pair(client, till["pairingCode"]).json()
+    assert paired["actions"] == ["register_product"]
+    phone = f"/api/v1/pos/scanner/{business_id}/{till['session']['id']}"
+    headers = {"X-Scanner-Token": paired["token"]}
+
+    assert client.get(f"{phone}/lookup", params={"barcode": "4809999"}, headers=headers).json()["productName"] == ""
+    body = {"productName": "Bread", "barcode": "4809999", "price": 45, "costPrice": 30, "stock": 12}
+    saved = client.post(f"{phone}/products", json=body, headers=headers)
+    assert saved.status_code == 201, saved.text
+    assert client.get(f"{phone}/lookup", params={"barcode": "4809999"}, headers=headers).json()["productName"] == "Bread"
+    assert client.post(f"{phone}/products", json=body, headers=headers).status_code == 400  # the barcode is taken
+
+    # It sells at the till right away: the scan finds it
+    assert client.post(f"{phone}/scans", json={"barcode": "4809999"}, headers=headers).status_code == 201
+    assert client.post(f"{phone}/products", json=body).status_code == 401  # no token, no product

@@ -27,7 +27,17 @@ from app.schemas.pos import (
     StockChangeIn,
     VoidIn,
 )
-from app.schemas.scanner import PairedScanner, PairIn, ScanIn, ScannerSessionStarted, ScannerSessionStartIn, ScannerSessionView
+from app.schemas.scanner import (
+    BarcodeLookup,
+    PairedScanner,
+    PairIn,
+    PhoneProductIn,
+    PhoneProductSaved,
+    PhoneStatus,
+    ScanIn,
+    ScannerSessionStarted,
+    ScannerSessionStartIn,
+)
 from app.schemas.user import CurrentUser
 
 router = APIRouter(tags=["Selling app"])
@@ -215,10 +225,30 @@ def pair_scanner(pair_in: PairIn, db: Client = Depends(get_db)):
     return scanner_controller.pair(db, pair_in.code, pair_in.scanner_name)
 
 
-@router.get("/pos/scanner/{business_id}/{session_id}", response_model=ScannerSessionView)
+@router.get("/pos/scanner/{business_id}/{session_id}", response_model=PhoneStatus)
 def phone_session(business_id: str, session_id: str, x_scanner_token: str = Header(default=""), db: Client = Depends(get_db)):
-    """Is the phone still connected? 401 when not (it scans the till's QR code again)."""
-    return scanner_controller.phone_session(db, business_id, session_id, x_scanner_token)[1]
+    """Is the phone still connected, and what may it do? 401 when not connected (it scans the till's QR code again)."""
+    return scanner_controller.phone_status(db, business_id, session_id, x_scanner_token)
+
+
+@router.get("/pos/scanner/{business_id}/{session_id}/lookup", response_model=BarcodeLookup)
+def lookup_barcode(
+    business_id: str, session_id: str, barcode: str, x_scanner_token: str = Header(default=""), db: Client = Depends(get_db)
+):
+    """Is this barcode already a product? The phone asks before registering a new one."""
+    return scanner_controller.lookup_barcode(db, business_id, session_id, x_scanner_token, barcode)
+
+
+@router.post("/pos/scanner/{business_id}/{session_id}/products", response_model=PhoneProductSaved, status_code=status.HTTP_201_CREATED)
+def register_product(
+    business_id: str,
+    session_id: str,
+    product_in: PhoneProductIn,
+    x_scanner_token: str = Header(default=""),
+    db: Client = Depends(get_db),
+):
+    """Registers a product from the phone (only when the person signed in on the till may manage products)."""
+    return scanner_controller.register_product(db, business_id, session_id, x_scanner_token, product_in)
 
 
 @router.delete("/pos/scanner/{business_id}/{session_id}", status_code=status.HTTP_204_NO_CONTENT)

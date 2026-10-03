@@ -21,11 +21,11 @@ from fastapi import HTTPException, status
 from google.api_core.exceptions import AlreadyExists
 from google.cloud.firestore import Client, FieldFilter
 
-from app.controllers import crud
+from app.controllers import crud, inventory_controller, product_controller
 from app.controllers.crud import bad_request, forbidden, not_found
 from app.controllers.pos_controller import _get_location as get_location
 from app.controllers.pos_controller import catalog_for
-from app.dependencies.business_access import BusinessAccess, load_business
+from app.dependencies.business_access import BusinessAccess, load_access, load_business
 from app.models.business import Business
 from app.models.scanner import (
     Scan,
@@ -37,9 +37,22 @@ from app.models.scanner import (
     scans_collection,
     secret_document,
 )
-from app.schemas.enums import BusinessStatus, Permission
+from app.schemas.enums import BusinessStatus, Permission, PriceType
 from app.schemas.pos import PosProduct
-from app.schemas.scanner import PairedScanner, ScanIn, ScannerSessionStarted, ScannerSessionView
+from app.schemas.inventory import InventoryIn
+from app.schemas.product import PriceDraft, ProductFormIn
+from app.schemas.scanner import (
+    REGISTER_PRODUCT,
+    BarcodeLookup,
+    PairedScanner,
+    PhoneProductIn,
+    PhoneProductSaved,
+    PhoneStatus,
+    ScanIn,
+    ScannerSessionStarted,
+    ScannerSessionView,
+)
+from app.schemas.user import CurrentUser
 from app.utils.helpers import current_time_ms
 
 SESSION_HOURS = 12  # a shift; then the phone pairs again
@@ -152,6 +165,7 @@ def pair(db: Client, code: str, scanner_name: str) -> PairedScanner:
         business_name=business.business_name,
         session=ScannerSessionView.model_validate(session),
         token=token,
+        actions=_actions(db, business.id, session),
     )
 
 
@@ -171,6 +185,62 @@ def phone_session(db: Client, business_id: str, session_id: str, token: str) -> 
     if not session.active or session.expires_at < current_time_ms():
         raise _not_paired("This connection has ended. Scan the till's QR code again.")
     return business, session
+
+
+# ---- More than scanning: what the person at the till may also do from the phone ----------------------
+
+
+def _till_access(db: Client, business_id: str, session: ScannerSession) -> BusinessAccess | None:
+    """The person signed in on the till that connected the phone, as they are NOW (None if they left the team)."""
+    try:
+        return load_access(db, business_id, CurrentUser(uid=session.till_uid, name=session.till_name))
+    except HTTPException:
+        return None
+
+
+def _actions(db: Client, business_id: str, session: ScannerSession) -> list[str]:
+    access = _till_access(db, business_id, session)
+    return [REGISTER_PRODUCT] if access is not None and access.can(Permission.MANAGE_PRODUCTS) else []
+
+
+def phone_status(db: Client, business_id: str, session_id: str, token: str) -> PhoneStatus:
+    _, session = phone_session(db, business_id, session_id, token)
+    return PhoneStatus(session=ScannerSessionView.model_validate(session), actions=_actions(db, business_id, session))
+
+
+def lookup_barcode(db: Client, business_id: str, session_id: str, token: str, barcode: str) -> BarcodeLookup:
+    """Before registering: is this barcode already one of the business's products?"""
+    business, _ = phone_session(db, business_id, session_id, token)
+    found = _find_item(catalog_for(db, business, datetime.datetime.now(datetime.UTC).date()), barcode.strip())
+    return BarcodeLookup(barcode=barcode.strip(), product_name=found[1] if found else "")
+
+
+def register_product(db: Client, business_id: str, session_id: str, token: str, product_in: PhoneProductIn) -> PhoneProductSaved:
+    """Registers a new product from the phone, in the name of the person signed in on the till (who must be
+    allowed to manage products, e.g. the owner or an admin): its barcode, selling price, and starting stock."""
+    business, session = phone_session(db, business_id, session_id, token)
+    access = _till_access(db, business_id, session)
+    if access is None or not access.can(Permission.MANAGE_PRODUCTS):
+        raise forbidden("The person signed in on the till may not add products")
+
+    barcode = product_in.barcode.strip()
+    today = datetime.datetime.now(datetime.UTC).date()
+    taken = _find_item(catalog_for(db, business, today), barcode)
+    if taken is not None:
+        raise bad_request(f"This barcode is already used by {taken[1]}")
+
+    form = ProductFormIn(
+        product_name=product_in.product_name,
+        barcode=barcode,
+        unit=product_in.unit,
+        cost_price=product_in.cost_price,
+        prices=[PriceDraft(price_type=PriceType.RETAIL, price=product_in.price, currency=business.currency, minimum_quantity=1)],
+    )
+    saved = product_controller.save_product_full(db, access, form)
+    if product_in.stock > 0:
+        stock = InventoryIn(product_id=saved.product.id, location_id=session.location_id, quantity=product_in.stock)
+        inventory_controller.add_stock_record(db, access, stock, note="Registered with the phone scanner")
+    return PhoneProductSaved(product_id=saved.product.id, product_name=saved.product.product_name)
 
 
 def phone_disconnect(db: Client, business_id: str, session_id: str, token: str) -> None:
