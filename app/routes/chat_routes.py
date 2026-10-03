@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, status
 
 from app.controllers import chat_controller
 from app.dependencies.business_access import BusinessAccess, get_business_access
-from app.schemas.chat import ChatAccess, ChatMessage, ChatMessageIn
+from app.schemas.chat import ChatAccess, ChatMessage, ChatMessageIn, MessageEditIn
 
 router = APIRouter(prefix="/businesses/{business_id}/chat", tags=["Chat"])
 
@@ -29,3 +29,19 @@ def send_market_message(message_in: ChatMessageIn, access: BusinessAccess = Depe
 @router.delete("/market/messages/{message_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_market_message(message_id: str, access: BusinessAccess = Depends(get_business_access)):
     chat_controller.delete_market_message(access, message_id)
+
+
+@router.put("/team/messages/{message_id}", response_model=ChatMessage)
+def edit_team_message(message_id: str, edit_in: MessageEditIn, access: BusinessAccess = Depends(get_business_access)):
+    """Only the sender may change their message."""
+    return chat_controller.edit_team_message(access, message_id, edit_in)
+
+
+@router.delete("/team/messages/{message_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_team_message(message_id: str, access: BusinessAccess = Depends(get_business_access)):
+    chat_controller.delete_team_message(access, message_id)
+
+
+@router.put("/market/messages/{message_id}", response_model=ChatMessage)
+def edit_market_message(message_id: str, edit_in: MessageEditIn, access: BusinessAccess = Depends(get_business_access)):
+    return chat_controller.edit_market_message(access, message_id, edit_in)

@@ -9,12 +9,14 @@ from google.cloud.firestore import Client, FieldFilter
 
 from app.controllers import activity_controller, crud
 from app.controllers.business_controller import find_business
+from app.controllers.chat_controller import run_message_change
 from app.controllers.crud import bad_request, not_found
 from app.core import cache, realtime
 from app.dependencies.business_access import BusinessAccess
 from app.models.network import Conversation, Message, conversations_collection, messages_collection
 from app.models.trade import Order, orders_collection
 from app.schemas.enums import ActivityCategory, Permission
+from app.schemas.chat import MessageEditIn
 from app.schemas.network import MessageIn, OrderCard, OrderCardLine, StartConversationIn
 from app.schemas.views import ConversationView, ConversationWithMessages
 from app.utils.helpers import current_time_ms
@@ -157,6 +159,48 @@ def _send(db: Client, access: BusinessAccess, conversation_id: str, message_in: 
     return message
 
 
+def edit_message(db: Client, access: BusinessAccess, conversation_id: str, message_id: str, edit_in: MessageEditIn) -> Message:
+    """The sender changes the text of their message (its photos and order card stay)."""
+    conversation = get_conversation(db, access, conversation_id)
+    path = f"{realtime.dm_path(conversation_id)}/messages/{message_id}"
+    data = run_message_change(lambda: realtime.edit_message(path, access.user.uid, edit_in.message, current_time_ms()))
+    _refresh_last_message(db, conversation)
+    return _from_realtime(message_id, data)
+
+
+def delete_message(db: Client, access: BusinessAccess, conversation_id: str, message_id: str) -> None:
+    """The sender deletes their message, for both businesses."""
+    conversation = get_conversation(db, access, conversation_id)
+    run_message_change(lambda: realtime.delete_message(f"{realtime.dm_path(conversation_id)}/messages/{message_id}", access.user.uid))
+    _refresh_last_message(db, conversation)
+
+
+def _refresh_last_message(db: Client, conversation: Conversation) -> None:
+    """The conversation list shows the newest message: after an edit or delete, it may be another one now."""
+    newest = realtime.get_store().newest(f"{realtime.dm_path(conversation.id)}/messages", 1)
+    last = newest[0] if newest else {}
+    conversations_collection(db).document(conversation.id).update(
+        {"lastMessage": (last.get("message") or ("Sent a photo" if last else ""))[:200], "updatedAt": current_time_ms()}
+    )
+    _clear_cache(conversation)
+
+
+def _from_realtime(message_id: str, item: dict) -> Message:
+    created_at = item.get("createdAt", 0)
+    return Message(
+        id=message_id,
+        sender_uid=item.get("senderUid", ""),
+        sender_name=item.get("senderName", ""),
+        sender_business_id=item.get("senderBusinessId", ""),
+        message=item.get("message", ""),
+        attachments=item.get("attachments") or [],
+        order=item.get("order"),
+        edited_at=item.get("editedAt"),
+        created_at=created_at,
+        updated_at=item.get("editedAt") or created_at,
+    )
+
+
 def _clear_cache(conversation: Conversation) -> None:
     """The conversation and both businesses' conversation lists are now outdated.
     Only their chat part: products, prices, and the rest stay cached."""
@@ -250,6 +294,7 @@ def _read_messages(conversation: Conversation) -> list[Message]:
                 message=item.get("message", ""),
                 attachments=item.get("attachments") or [],
                 order=item.get("order"),
+                edited_at=item.get("editedAt"),
                 read_at=read_at if read_at >= created_at else None,
                 created_at=created_at,
                 updated_at=created_at,

@@ -7,6 +7,7 @@ from app.controllers import conversation_controller, relationship_controller, re
 from app.core.firebase import get_db
 from app.dependencies.business_access import BusinessAccess, get_business_access
 from app.models.network import Message, Review
+from app.schemas.chat import MessageEditIn
 from app.schemas.network import (
     MessageIn,
     RelationshipIn,
@@ -74,6 +75,26 @@ def send_message(
     conversation_id: str, message_in: MessageIn, db: Client = Depends(get_db), access: BusinessAccess = Depends(get_business_access)
 ):
     return conversation_controller.send_message(db, access, conversation_id, message_in)
+
+
+@router.put("/conversations/{conversation_id}/messages/{message_id}", response_model=Message)
+def edit_message(
+    conversation_id: str,
+    message_id: str,
+    edit_in: MessageEditIn,
+    db: Client = Depends(get_db),
+    access: BusinessAccess = Depends(get_business_access),
+):
+    """Only the sender may change their message."""
+    return conversation_controller.edit_message(db, access, conversation_id, message_id, edit_in)
+
+
+@router.delete("/conversations/{conversation_id}/messages/{message_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_message(
+    conversation_id: str, message_id: str, db: Client = Depends(get_db), access: BusinessAccess = Depends(get_business_access)
+):
+    """Only the sender may delete their message (for both businesses)."""
+    conversation_controller.delete_message(db, access, conversation_id, message_id)
 
 
 # ---- Reviews about this business ------------------------------------------------------------

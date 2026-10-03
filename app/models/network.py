@@ -94,6 +94,7 @@ class Message(FirestoreModel):
     message: str
     attachments: list[str] = []
     order: OrderCard | None = None  # the order the message is about, as a small card
+    edited_at: int | None = None  # set when the sender changed the text
     read_at: int | None = None
 
 

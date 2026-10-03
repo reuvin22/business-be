@@ -177,3 +177,32 @@ def delete_team(business_id: str, member_uids: list[str]) -> None:
     store.delete(f"live/{business_id}")
     for uid in member_uids:
         store.delete(access_path(uid, business_id))
+
+
+def edit_message(path: str, uid: str, text: str, now: int) -> dict:
+    """Changes the text of the message at path (chat/.../messages/{id}). Only its sender may.
+    Returns the message as it is now. Raises LookupError / PermissionError / ValueError."""
+    store = get_store()
+    message = store.get(path)
+    if not message:
+        raise LookupError("Message")
+    if message.get("senderUid") != uid:
+        raise PermissionError("You can only edit your own messages")
+    if not text.strip() and not message.get("attachments") and not message.get("order"):
+        raise ValueError("A message needs some text (or delete it instead)")
+    store.update(path, {"message": text.strip(), "editedAt": now})
+    return {**message, "message": text.strip(), "editedAt": now}
+
+
+def delete_message(path: str, uid: str, business_id: str = "", by_business: str = "") -> dict:
+    """Deletes the message at path. Its sender may; so may its business when by_business is that business
+    (a business taking back its own market post). Returns the deleted message."""
+    store = get_store()
+    message = store.get(path)
+    if not message:
+        raise LookupError("Message")
+    own_business = bool(by_business) and message.get("businessId") == by_business
+    if message.get("senderUid") != uid and not own_business:
+        raise PermissionError("You can only delete your own messages")
+    store.delete(path)
+    return message

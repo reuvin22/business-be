@@ -2,10 +2,10 @@
 channel where every business can post offers and announcements. Messages live in the Realtime Database
 (see app/core/realtime.py); the browser listens to them and sends through the API."""
 
-from app.controllers.crud import forbidden, not_found
+from app.controllers.crud import bad_request, forbidden, not_found
 from app.core import realtime
 from app.dependencies.business_access import BusinessAccess
-from app.schemas.chat import ChatAccess, ChatMessage, ChatMessageIn
+from app.schemas.chat import ChatAccess, ChatMessage, ChatMessageIn, MessageEditIn
 from app.schemas.enums import Permission
 from app.utils.helpers import current_time_ms
 
@@ -36,16 +36,39 @@ def send_market_message(access: BusinessAccess, message_in: ChatMessageIn) -> Ch
 
 
 def delete_market_message(access: BusinessAccess, message_id: str) -> None:
-    """A business may take back its own market posts."""
-    access.require(Permission.SEND_MESSAGES)
-    store = realtime.get_store()
+    """The sender takes back their post; so may their business (any member who may send messages)."""
+    by_business = access.business_id if access.can(Permission.SEND_MESSAGES) else ""
+    run_message_change(lambda: realtime.delete_message(f"{realtime.MARKET_PATH}/{message_id}", access.user.uid, by_business=by_business))
+
+
+def edit_market_message(access: BusinessAccess, message_id: str, edit_in: MessageEditIn) -> ChatMessage:
     path = f"{realtime.MARKET_PATH}/{message_id}"
-    message = store.get(path)
-    if not message:
-        raise not_found("Message")
-    if message.get("businessId") != access.business_id:
-        raise forbidden("You can only delete your own business's posts")
-    store.delete(path)
+    return _as_message(message_id, run_message_change(lambda: realtime.edit_message(path, access.user.uid, edit_in.message, current_time_ms())))
+
+
+def edit_team_message(access: BusinessAccess, message_id: str, edit_in: MessageEditIn) -> ChatMessage:
+    path = f"{realtime.team_path(access.business_id)}/{message_id}"
+    return _as_message(message_id, run_message_change(lambda: realtime.edit_message(path, access.user.uid, edit_in.message, current_time_ms())))
+
+
+def delete_team_message(access: BusinessAccess, message_id: str) -> None:
+    run_message_change(lambda: realtime.delete_message(f"{realtime.team_path(access.business_id)}/{message_id}", access.user.uid))
+
+
+def run_message_change(action):
+    """Runs an edit or delete of a message, turning its errors into answers for the browser."""
+    try:
+        return action()
+    except LookupError:
+        raise not_found("Message") from None
+    except PermissionError as error:
+        raise forbidden(str(error)) from None
+    except ValueError as error:
+        raise bad_request(str(error)) from None
+
+
+def _as_message(message_id: str, data: dict) -> ChatMessage:
+    return ChatMessage.model_validate({**data, "id": message_id})
 
 
 def _post(access: BusinessAccess, path: str, message_in: ChatMessageIn) -> ChatMessage:

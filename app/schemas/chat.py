@@ -29,6 +29,7 @@ class ChatMessage(CamelModel):
     business_logo: str = ""
     message: str
     attachments: list[str] = []  # photos
+    edited_at: int | None = None  # set when the sender changed the text
     created_at: int
 
 
@@ -39,3 +40,9 @@ class ChatAccess(CamelModel):
     business_id: str
     team_path: str  # this business's team channel
     market_path: str  # the public market channel
+
+
+class MessageEditIn(CamelModel):
+    """The new text of a message (its photos and order card stay as they are)."""
+
+    message: str = Field(default="", max_length=2000)
