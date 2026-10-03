@@ -137,6 +137,7 @@ class PosContext(CamelModel):
     seller_name: str
     role: str
     can_void_any: bool  # managers can void anyone's receipt; sellers only their own, on the same day
+    can_manage_products: bool = False  # may let a phone scanner register products
     locations: list[PosLocation]  # a seller with a store sees only that one
     # True when e-wallet, card, and bank transfer are paid online through Xendit (a QR code at the till)
     online_payments: bool = False

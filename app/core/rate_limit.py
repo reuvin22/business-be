@@ -32,6 +32,8 @@ SIGN_IN_FREE = Limit("anonymous", 120, 60)  # requests without a login (health c
 PAIRING = Limit("pair", 10, 60)
 # A paired phone scanner (its token): about one scan a second, with room for quick bursts
 SCANNER = Limit("scanner", 90, 60)
+# All phone scanners behind one network address (a shop's Wi-Fi may have a few): stops made-up tokens
+SCANNERS_PER_ADDRESS = Limit("scanner-address", 360, 60)
 
 # Expensive paths get their own, lower limits: (path contains, limit)
 SPECIAL = [

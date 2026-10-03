@@ -13,6 +13,8 @@ class ScannerSessionStartIn(CamelModel):
     location_id: str = Field(min_length=1)  # the store the till sells at (admin: where new products' stock goes)
     # A random id this till's browser keeps: each till has its own sessions (two tills never share one)
     till_device_id: str = Field(min_length=16, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
+    # Till mode: may the phone also register products? (Only for people who may manage products.) Admin mode: always.
+    allow_register: bool = False
 
 
 class ScannerSessionStarted(CamelModel):
@@ -34,6 +36,8 @@ class ScannerSessionView(CamelModel):
     active: bool
     expires_at: int
     paired_at: int | None = None
+    approved: bool = False  # the till approved the phone (until then it can do nothing)
+    allow_register: bool = False
 
 
 class PairIn(CamelModel):

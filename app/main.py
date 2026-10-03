@@ -74,6 +74,11 @@ async def limit_rate(request: Request, call_next):
     limits = rate_limit.limits_for(request.method, path, signed_in=caller.startswith("u:"), scanner=caller.startswith("s:"))
     if path.endswith("/pos/scanner/pair"):
         caller = f"ip:{client_ip}"  # guessing codes is limited per network address, whatever is sent
+    elif caller.startswith("s:"):
+        # Per phone token, AND per address: a new made-up token each time must not get a fresh allowance
+        wait = await run_in_threadpool(rate_limit.hit, f"ip:{client_ip}", rate_limit.SCANNERS_PER_ADDRESS)
+        if wait is not None:
+            return JSONResponse(status_code=429, content={"detail": f"Too many requests. Please wait {wait} seconds."}, headers={"Retry-After": str(wait)})
     for limit in limits:
         wait = await run_in_threadpool(rate_limit.hit, caller, limit)
         if wait is not None:

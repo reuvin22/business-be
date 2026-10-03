@@ -209,7 +209,22 @@ def start_scanner_session(
     session_in: ScannerSessionStartIn, db: Client = Depends(get_db), access: BusinessAccess = Depends(get_pos_access)
 ):
     """The till starts a session and shows its own one-time pairing code (a QR code) for the phone to scan."""
-    return scanner_controller.start_session(db, access, session_in.location_id, session_in.till_device_id)
+    return scanner_controller.start_session(
+        db, access, session_in.location_id, session_in.till_device_id, allow_register=session_in.allow_register
+    )
+
+
+@router.post("/businesses/{business_id}/pos/scanner-sessions/{session_id}/approve", status_code=status.HTTP_204_NO_CONTENT)
+def approve_scanner(session_id: str, till_device_id: str, db: Client = Depends(get_db), access: BusinessAccess = Depends(get_pos_access)):
+    """The till lets the phone that scanned its QR code work. (To refuse it: DELETE the session.)"""
+    scanner_controller.approve_session(db, access, session_id, till_device_id)
+
+
+@router.post("/businesses/{business_id}/admin-scanner-sessions/{session_id}/approve", status_code=status.HTTP_204_NO_CONTENT)
+def approve_admin_scanner(
+    session_id: str, till_device_id: str, db: Client = Depends(get_db), access: BusinessAccess = Depends(get_business_access)
+):
+    scanner_controller.approve_session(db, access, session_id, till_device_id)
 
 
 @router.post("/businesses/{business_id}/admin-scanner-sessions", response_model=ScannerSessionStarted, status_code=status.HTTP_201_CREATED)

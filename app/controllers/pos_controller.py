@@ -117,6 +117,7 @@ def get_context(db: Client, access: BusinessAccess) -> PosContext:
         seller_name=access.member.display_name or access.user.name or access.user.email or "",
         role=access.member.role,
         can_void_any=access.can(Permission.MANAGE_INVENTORY),
+        can_manage_products=access.can(Permission.MANAGE_PRODUCTS),
         online_payments=settings.xendit_configured,
         **_template(settings_controller.get_pos_settings(db, access.business_id)),
         locations=[PosLocation(id=location.id, location_name=location.location_name) for location in locations],

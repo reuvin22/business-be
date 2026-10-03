@@ -39,10 +39,16 @@ def test_pairing_is_limited_per_address():
     assert rate_limit.caller_key("", "1.2.3.4", "token-a") != rate_limit.caller_key("", "1.2.3.4", "token-b")
 
 
-def start(client, shop, location_id, till):
-    response = client.post(f"{shop}/scanner-sessions", json={"locationId": location_id, "tillDeviceId": till})
+def start(client, shop, location_id, till, allow_register=False):
+    body = {"locationId": location_id, "tillDeviceId": till, "allowRegister": allow_register}
+    response = client.post(f"{shop}/scanner-sessions", json=body)
     assert response.status_code == 201, response.text
     return response.json()
+
+
+def approve(client, shop, started, till):
+    response = client.post(f"{shop}/scanner-sessions/{started['session']['id']}/approve", params={"till_device_id": till})
+    assert response.status_code == 204, response.text
 
 
 def pair(client, code, name="Phone"):
@@ -75,6 +81,15 @@ def test_each_till_gets_only_its_own_scans(client, firestore_db):
     token_b = pair(client, b["pairingCode"]).json()["token"]
 
     scans = lambda session: f"/api/v1/pos/scanner/{business_id}/{session['session']['id']}/scans"  # noqa: E731
+    # Nothing works until each till approves its phone (a photographed QR code is useless)
+    waiting = client.post(scans(a), json={"barcode": "4800001"}, headers={"X-Scanner-Token": token_a})
+    assert waiting.status_code == 403
+    # Another till cannot approve (or end) it
+    other = client.post(f"{shop}/scanner-sessions/{a['session']['id']}/approve", params={"till_device_id": TILL_B})
+    assert other.status_code == 403
+    approve(client, shop, a, TILL_A)
+    approve(client, shop, b, TILL_B)
+
     # Each phone can only add to its own till
     assert client.post(scans(a), json={"barcode": "4800001"}, headers={"X-Scanner-Token": token_a}).status_code == 201
     assert client.post(scans(b), json={"barcode": "4800001"}, headers={"X-Scanner-Token": token_a}).status_code == 401
@@ -103,7 +118,7 @@ def test_register_product_is_offered_only_to_tills_that_may_manage_products(monk
     from app.controllers import scanner_controller
     from app.schemas.enums import Permission
 
-    session = SimpleNamespace(till_uid="u1", till_name="Ana")
+    session = SimpleNamespace(till_uid="u1", till_name="Ana", allow_register=True, approved=True)
     admin = SimpleNamespace(can=lambda permission: permission == Permission.MANAGE_PRODUCTS)
     cashier = SimpleNamespace(can=lambda permission: False)
     monkeypatch.setattr(scanner_controller, "_till_access", lambda db, business_id, s: admin)
@@ -118,11 +133,21 @@ def test_registering_a_product_from_the_phone(client, firestore_db):
     business_id = create_business(client)["id"]
     _, location_id = create_product_with_stock(client, business_id)
     shop = f"/api/v1/businesses/{business_id}/pos"
-    till = start(client, shop, location_id, TILL_A)  # the owner is signed in on the till
+    plain = start(client, shop, location_id, TILL_B)  # registering not allowed: scanning only
+    phone = pair(client, plain["pairingCode"]).json()
+    approve(client, shop, plain, TILL_B)
+    plain_path = f"/api/v1/pos/scanner/{business_id}/{plain['session']['id']}"
+    assert client.get(plain_path, headers={"X-Scanner-Token": phone["token"]}).json()["actions"] == []
+    refused = client.post(f"{plain_path}/products", json={"productName": "X", "barcode": "1"}, headers={"X-Scanner-Token": phone["token"]})
+    assert refused.status_code == 403
+
+    till = start(client, shop, location_id, TILL_A, allow_register=True)  # the owner is signed in on the till
     paired = pair(client, till["pairingCode"]).json()
-    assert paired["actions"] == ["register_product"]
+    assert paired["actions"] == []  # not before the till approves
+    approve(client, shop, till, TILL_A)
     phone = f"/api/v1/pos/scanner/{business_id}/{till['session']['id']}"
     headers = {"X-Scanner-Token": paired["token"]}
+    assert client.get(phone, headers=headers).json()["actions"] == ["register_product"]
 
     assert client.get(f"{phone}/lookup", params={"barcode": "4809999"}, headers=headers).json()["productName"] == ""
     body = {
@@ -155,7 +180,10 @@ def test_a_phone_connected_from_the_web_app_only_registers_products(client, fire
     )
     assert started.status_code == 201, started.text
     paired = pair(client, started.json()["pairingCode"]).json()
-    assert paired["session"]["mode"] == "admin" and paired["actions"] == ["register_product"]
+    assert paired["session"]["mode"] == "admin" and not paired["session"]["approved"]
+    session_id = started.json()["session"]["id"]
+    response = client.post(f"/api/v1/businesses/{business_id}/admin-scanner-sessions/{session_id}/approve", params={"till_device_id": TILL_A})
+    assert response.status_code == 204, response.text
 
     phone = f"/api/v1/pos/scanner/{business_id}/{started.json()['session']['id']}"
     headers = {"X-Scanner-Token": paired["token"]}
@@ -171,4 +199,35 @@ def test_the_phone_form_takes_what_the_web_form_takes():
 
     assert set(ProductFormIn.model_fields) <= set(PhoneProductIn.model_fields)
     assert set(PhoneProductIn.model_fields) - set(ProductFormIn.model_fields) == {"stock"}
+
+
+def test_registering_needs_the_session_to_allow_it_and_an_approved_phone(monkeypatch):
+    from types import SimpleNamespace
+
+    from app.controllers import scanner_controller
+    from app.schemas.enums import Permission
+
+    admin = SimpleNamespace(can=lambda permission: permission == Permission.MANAGE_PRODUCTS)
+    monkeypatch.setattr(scanner_controller, "_till_access", lambda db, business_id, s: admin)
+    not_allowed = SimpleNamespace(till_uid="u1", till_name="Ana", allow_register=False, approved=True)
+    not_approved = SimpleNamespace(till_uid="u1", till_name="Ana", allow_register=True, approved=False)
+    assert scanner_controller._actions(None, "b1", not_allowed) == []  # an admin at the till is not enough
+    assert scanner_controller._actions(None, "b1", not_approved) == []  # a photographed QR code gets nothing
+
+
+def test_only_a_hash_of_the_till_id_is_stored():
+    from app.controllers.scanner_controller import _device
+
+    assert TILL_A not in _device(TILL_A) and len(_device(TILL_A)) == 64
+    assert _device(TILL_A) != _device(TILL_B)
+
+
+def test_made_up_tokens_are_limited_per_address():
+    from app.core import rate_limit as rl
+
+    rl.reset()
+    limit = rl.SCANNERS_PER_ADDRESS
+    for _ in range(limit.requests):
+        assert rl.hit("ip:9.9.9.9", limit) is None
+    assert rl.hit("ip:9.9.9.9", limit) is not None
 

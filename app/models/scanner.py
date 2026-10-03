@@ -23,13 +23,22 @@ class ScannerSession(FirestoreModel):
     mode: str = "till"
     location_id: str
     location_name: str = ""
-    till_device_id: str  # the till (one browser) that started it: each till has its own sessions
+    # A hash of the till's (browser's) random id: each till has its own sessions. Only the hash is stored (every
+    # team member can read sessions), so nobody can pose as another till by reading it here.
+    till_device_id: str
     till_uid: str  # who was signed in on the till
     till_name: str = ""
     active: bool = True
     expires_at: int  # the session ends by itself after a shift
     scanner_name: str = ""  # the phone, once paired
     paired_at: int | None = None
+    # The phone works only after the till approves it ("Ana's phone wants to connect"): a QR code photographed by
+    # someone else (e.g. a customer at the counter) is useless without the cashier's OK
+    approved: bool = False
+    approved_at: int | None = None
+    # May the phone register products? Only when the person who started the session chose so (and may manage products)
+    allow_register: bool = False
+    last_used_at: int | None = None  # the phone's last scan or registration (sessions end when idle too long)
     last_scan_at: int | None = None
 
 

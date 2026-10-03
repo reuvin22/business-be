@@ -21,7 +21,7 @@ from fastapi import HTTPException, UploadFile, status
 from google.api_core.exceptions import AlreadyExists
 from google.cloud.firestore import Client, FieldFilter
 
-from app.controllers import crud, inventory_controller, product_controller
+from app.controllers import activity_controller, crud, inventory_controller, product_controller
 from app.controllers.brand_controller import list_brands
 from app.controllers.category_controller import list_categories
 from app.controllers.crud import bad_request, forbidden, not_found
@@ -40,7 +40,7 @@ from app.models.scanner import (
     scans_collection,
     secret_document,
 )
-from app.schemas.enums import ActiveStatus, BusinessStatus, MediaType, Permission
+from app.schemas.enums import ActiveStatus, ActivityCategory, BusinessStatus, MediaType, Permission
 from app.schemas.pos import PosProduct
 from app.schemas.inventory import InventoryIn
 from app.schemas.product import ProductFormIn
@@ -61,6 +61,10 @@ from app.schemas.user import CurrentUser
 from app.utils.helpers import current_time_ms
 
 SESSION_HOURS = 12  # a shift; then the phone pairs again
+ADMIN_SESSION_HOURS = 2  # a phone that may register products: a shorter time
+# A session ends when its phone has not been used this long (a phone left on the counter stops working)
+IDLE_MINUTES = {"till": 120, "admin": 30}
+APPROVAL_MINUTES = 10  # a phone the till did not approve in time must pair again
 PAIRING_MINUTES = 10  # the code on the till's screen works this long, and once
 # No 0/O or 1/I/L: the code can also be typed on the phone
 CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
@@ -85,6 +89,11 @@ def _new_code(db: Client, pairing: ScannerPairing) -> str:
     raise RuntimeError("Could not make a unique pairing code")
 
 
+def _device(till_device_id: str) -> str:
+    """Only a hash of the till's id is stored (team members can read sessions)."""
+    return _hash(f"till-device:{till_device_id}")
+
+
 def _end(db: Client, business_id: str, session_id: str) -> None:
     """Ends a session: its phone's token stops working at once."""
     scanner_sessions_collection(db, business_id).document(session_id).update({"active": False, "updatedAt": current_time_ms()})
@@ -95,16 +104,22 @@ def _end(db: Client, business_id: str, session_id: str) -> None:
 
 
 def start_session(
-    db: Client, access: BusinessAccess, location_id: str, till_device_id: str, mode: str = "till"
+    db: Client, access: BusinessAccess, location_id: str, till_device_id: str, mode: str = "till", allow_register: bool = False
 ) -> ScannerSessionStarted:
     """A new session (and QR code) for THIS till (or web app browser). Ends its earlier sessions, never another's.
 
-    mode "admin" (from the web app): the phone only registers products, so only people who manage products start one."""
+    mode "admin" (from the web app): the phone only registers products, so only people who manage products start one.
+    allow_register (till mode): the phone may also register products; also only for people who manage products."""
+    allow_register = allow_register or mode == "admin"
     access.require(Permission.MANAGE_PRODUCTS if mode == "admin" else Permission.USE_POS)
+    if allow_register:
+        access.require(Permission.MANAGE_PRODUCTS)
     location = get_location(db, access, location_id)  # the same check as selling: a seller only at their store
-    this_till = FieldFilter("tillDeviceId", "==", till_device_id)
+    device = _device(till_device_id)
+    this_till = FieldFilter("tillDeviceId", "==", device)
     for snapshot in scanner_sessions_collection(db, access.business_id).where(filter=this_till).stream():
-        if (snapshot.to_dict() or {}).get("active"):
+        data = snapshot.to_dict() or {}
+        if data.get("active") and data.get("tillUid") == access.user.uid:  # this till, this person
             _end(db, access.business_id, snapshot.id)
 
     now = current_time_ms()
@@ -112,12 +127,13 @@ def start_session(
     session = ScannerSession(
         id=ref.id,
         mode=mode,
+        allow_register=allow_register,
         location_id=location.id,
         location_name=location.location_name,
-        till_device_id=till_device_id,
+        till_device_id=device,
         till_uid=access.user.uid,
         till_name=access.member.display_name or access.user.name or access.user.email or "",
-        expires_at=now + SESSION_HOURS * 3600 * 1000,
+        expires_at=now + (ADMIN_SESSION_HOURS if allow_register else SESSION_HOURS) * 3600 * 1000,
         created_at=now,
         updated_at=now,
     )
@@ -131,14 +147,33 @@ def start_session(
     )
 
 
-def end_session(db: Client, access: BusinessAccess, session_id: str, till_device_id: str) -> None:
-    """The till disconnects its phone. Only that till (or a manager) may."""
+def _own_session(db: Client, access: BusinessAccess, session_id: str, till_device_id: str) -> ScannerSession:
+    """A session of THIS till (its browser id, and the person signed in on it)."""
     session = crud.read_fresh(scanner_sessions_collection(db, access.business_id).document(session_id), ScannerSession)
     if session is None:
         raise not_found("Scanner session")
-    if session.till_device_id != till_device_id and not access.can(Permission.MANAGE_INVENTORY):
+    mine = hmac.compare_digest(session.till_device_id, _device(till_device_id)) and session.till_uid == access.user.uid
+    if not mine:
         raise forbidden("This phone is connected to another till")
+    return session
+
+
+def end_session(db: Client, access: BusinessAccess, session_id: str, till_device_id: str) -> None:
+    """The till disconnects (or refuses) its phone. Only that till may; a manager may end any session."""
+    if not access.can(Permission.MANAGE_INVENTORY):
+        _own_session(db, access, session_id, till_device_id)
     _end(db, access.business_id, session_id)
+
+
+def approve_session(db: Client, access: BusinessAccess, session_id: str, till_device_id: str) -> None:
+    """The till lets the phone that just paired work ("Ana's phone wants to connect" -> Allow)."""
+    session = _own_session(db, access, session_id, till_device_id)
+    if not session.active or not session.paired_at:
+        raise bad_request("No phone is waiting to connect")
+    now = current_time_ms()
+    scanner_sessions_collection(db, access.business_id).document(session_id).update(
+        {"approved": True, "approvedAt": now, "lastUsedAt": now, "updatedAt": now}
+    )
 
 
 # ---- The phone (no sign-in: the QR code, then its token) ---------------------------------------------
@@ -159,7 +194,7 @@ def pair(db: Client, code: str, scanner_name: str) -> PairedScanner:
     session_ref = scanner_sessions_collection(db, pairing.business_id).document(pairing.session_id)
     session = crud.read_fresh(session_ref, ScannerSession)
     business = load_business(db, pairing.business_id)
-    if session is None or not session.active or business is None:
+    if session is None or not session.active or session.paired_at or business is None:
         raise not_found("Scanner session (start again on the till)")
 
     token = secrets.token_urlsafe(32)
@@ -183,17 +218,46 @@ def _not_paired(message: str = "This phone is not connected to that till. Scan t
     return HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=message)
 
 
-def phone_session(db: Client, business_id: str, session_id: str, token: str) -> tuple[Business, ScannerSession]:
-    """The session this phone's token opens, or 401 (the phone must scan the till's QR code again)."""
+def phone_session(
+    db: Client, business_id: str, session_id: str, token: str, *, approved: bool = True, use: bool = True
+) -> tuple[Business, ScannerSession]:
+    """The session this phone's token opens, or 401 (the phone must scan the till's QR code again).
+
+    approved: the till must have approved the phone (403 while it waits). use: this request counts as using the
+    phone (it keeps an idle session open)."""
     secret = crud.read_fresh(secret_document(db, business_id, session_id), ScannerSecret) if token else None
     if secret is None or not hmac.compare_digest(secret.token_hash, _hash(token)):
         raise _not_paired()
-    session = crud.read_fresh(scanner_sessions_collection(db, business_id).document(session_id), ScannerSession)
+    session_ref = scanner_sessions_collection(db, business_id).document(session_id)
+    session = crud.read_fresh(session_ref, ScannerSession)
     business = load_business(db, business_id)
     if session is None or business is None or business.business_status != BusinessStatus.ACTIVE:
         raise _not_paired()
-    if not session.active or session.expires_at < current_time_ms():
+    now = current_time_ms()
+    if not session.active or session.expires_at < now:
         raise _not_paired("This connection has ended. Scan the till's QR code again.")
+
+    if not session.approved:
+        if session.paired_at and now - session.paired_at > APPROVAL_MINUTES * 60 * 1000:
+            _end(db, business_id, session_id)
+            raise _not_paired("The till did not approve this phone in time. Scan its QR code again.")
+        if approved:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Waiting for the till to approve this phone")
+        return business, session
+
+    idle_since = session.last_used_at or session.approved_at or session.paired_at or now
+    if now - idle_since > IDLE_MINUTES.get(session.mode, 120) * 60 * 1000:
+        _end(db, business_id, session_id)
+        raise _not_paired("This phone was not used for a while, so it was disconnected. Scan the till's QR code again.")
+    # The person who connected it must still be on the team (and allowed to do what the session is for)
+    till = _till_access(db, business_id, session)
+    needed = Permission.MANAGE_PRODUCTS if session.mode == "admin" else Permission.USE_POS
+    if till is None or not till.can(needed):
+        _end(db, business_id, session_id)
+        raise _not_paired("The person who connected this phone may no longer do so. Scan a QR code again.")
+    if use:
+        session_ref.update({"lastUsedAt": now})
+        session.last_used_at = now
     return business, session
 
 
@@ -209,12 +273,17 @@ def _till_access(db: Client, business_id: str, session: ScannerSession) -> Busin
 
 
 def _actions(db: Client, business_id: str, session: ScannerSession) -> list[str]:
+    """Registering products: only when the session allows it, the till approved the phone, and the person who
+    started the session may (still) manage products."""
+    if not session.allow_register or not session.approved:
+        return []
     access = _till_access(db, business_id, session)
     return [REGISTER_PRODUCT] if access is not None and access.can(Permission.MANAGE_PRODUCTS) else []
 
 
 def phone_status(db: Client, business_id: str, session_id: str, token: str) -> PhoneStatus:
-    _, session = phone_session(db, business_id, session_id, token)
+    """Works while the phone waits for approval too (it asks until the till answers). Does not count as use."""
+    _, session = phone_session(db, business_id, session_id, token, approved=False, use=False)
     return PhoneStatus(session=ScannerSessionView.model_validate(session), actions=_actions(db, business_id, session))
 
 
@@ -228,9 +297,11 @@ def lookup_barcode(db: Client, business_id: str, session_id: str, token: str, ba
 def _managing_access(db: Client, business_id: str, session_id: str, token: str) -> tuple[Business, ScannerSession, BusinessAccess]:
     """The phone's session, and the person signed in on its till, who must be allowed to manage products."""
     business, session = phone_session(db, business_id, session_id, token)
+    if REGISTER_PRODUCT not in _actions(db, business_id, session):
+        raise forbidden("This phone may not register products. Connect it with “Allow this phone to register products”.")
     access = _till_access(db, business_id, session)
-    if access is None or not access.can(Permission.MANAGE_PRODUCTS):
-        raise forbidden("The person signed in on the till may not add products")
+    if access is None:
+        raise forbidden("The person who connected this phone may not add products")
     return business, session, access
 
 
@@ -273,6 +344,17 @@ def register_product(db: Client, business_id: str, session_id: str, token: str, 
 
     form = ProductFormIn.model_validate(product_in.model_dump(exclude={"stock"}) | {"barcode": barcode})
     saved = product_controller.save_product_full(db, access, form)
+    # The history says it came from the phone (and which), not only who connected it
+    activity_controller.record(
+        db,
+        business_id,
+        ActivityCategory.PRODUCTS,
+        "product.registered_by_scanner",
+        f"{session.scanner_name or 'A phone scanner'} registered {saved.product.product_name}",
+        by=access,
+        detail=f"Barcode {barcode}. Phone connected by {session.till_name or 'a team member'} at {session.location_name}.",
+        link=f"/products/{saved.product.id}",
+    )
     if product_in.stock > 0 and not saved.variants:
         stock = InventoryIn(product_id=saved.product.id, location_id=session.location_id, quantity=product_in.stock)
         inventory_controller.add_stock_record(db, access, stock, note="Registered with the phone scanner")
@@ -280,7 +362,7 @@ def register_product(db: Client, business_id: str, session_id: str, token: str, 
 
 
 def phone_disconnect(db: Client, business_id: str, session_id: str, token: str) -> None:
-    phone_session(db, business_id, session_id, token)
+    phone_session(db, business_id, session_id, token, approved=False, use=False)  # also while waiting for approval
     _end(db, business_id, session_id)
 
 
