@@ -3,7 +3,7 @@ rules_version = '2';
 // All writes go through the API. The API uses the Admin SDK, which ignores these rules.
 //
 // The browser may only READ, live, the few things that must update in real time:
-// stock levels and products. The main app and the selling app (my-business-pos) listen to
+// stock levels, products, and the barcodes a phone scanner sends to a till. The main app and the selling app (my-business-pos) listen to
 // them, so a sale at the counter shows up on the owner's screen right away, and the other way round.
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -32,6 +32,15 @@ service cloud.firestore {
 
       match /products/{productId} {
         allow read: if isActiveMember();
+      }
+
+      // A till listens to the phone scanner paired with it (business-scanner): the session and its scans
+      match /scannerSessions/{sessionId} {
+        allow read: if isActiveMember();
+
+        match /scans/{scanId} {
+          allow read: if isActiveMember();
+        }
       }
     }
   }

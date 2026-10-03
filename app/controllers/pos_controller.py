@@ -130,16 +130,20 @@ def _template(pos_settings) -> dict:
 
 
 def get_catalog(db: Client, access: BusinessAccess, today: datetime.date) -> list[PosProduct]:
+    return catalog_for(db, access.business, today)
+
+
+def catalog_for(db: Client, business: Business, today: datetime.date) -> list[PosProduct]:
     """Active products with their variants and today's counter prices.
 
     The whole catalog is cached as one entry (per day, since prices can start or end on a date), so
     opening the selling app is one cache read instead of one per product. It is part of the business's
     cache, so changing a product, variant, price, or the business itself makes it outdated."""
     catalog = cache.cached_models(
-        cache.business_scope(access.business_id),
+        cache.business_scope(business.id),
         f"pos-catalog:{today.isoformat()}",
         PosProduct,
-        lambda: _build_catalog(db, access, today),
+        lambda: _build_catalog(db, business, today),
     )
     # Category names are shared by every business (and cached on their own): added here, so a renamed
     # category shows at once without rebuilding every catalog
@@ -149,12 +153,12 @@ def get_catalog(db: Client, access: BusinessAccess, today: datetime.date) -> lis
     return catalog
 
 
-def _build_catalog(db: Client, access: BusinessAccess, today: datetime.date) -> list[PosProduct]:
+def _build_catalog(db: Client, business: Business, today: datetime.date) -> list[PosProduct]:
     # One after the other: each of these already reads its products in parallel
-    products = list_products(db, access.business_id)
-    variants = list_all_variants(db, access.business_id)
-    prices = list_all_prices(db, access.business_id)
-    currency = access.business.currency
+    products = list_products(db, business.id)
+    variants = list_all_variants(db, business.id)
+    prices = list_all_prices(db, business.id)
+    currency = business.currency
     catalog = []
     for product in products:
         if product.status != ProductStatus.ACTIVE:

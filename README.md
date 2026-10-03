@@ -201,6 +201,22 @@ so only the first person to open a list waits for the outside service. If a serv
 the name can be typed instead. Zones now have a `country` (empty on older zones = any country); the most specific
 zone wins: barangay > city > province > region > country.
 
+## Phone scanner (business-scanner app)
+
+A phone can be a barcode scanner for one till (`app/controllers/scanner_controller.py`). The phone does **not** sign in.
+
+- The till (signed in) starts a session with its own `tillDeviceId` (a random id its browser keeps):
+  `POST /businesses/{id}/pos/scanner-sessions`. Starting one ends only that till's earlier sessions. It gets a one-time
+  pairing code (unique: saved with `create()`, which fails if the code exists; one use; 10 minutes) shown as a QR code.
+- The phone pairs with the code: `POST /pos/scanner/pair` (no login; 10 tries a minute per address). It gets a secret
+  token, stored only as a SHA-256 hash in `scannerSecrets/` (private).
+- The phone sends scans with the `X-Scanner-Token` header: `POST /pos/scanner/{businessId}/{sessionId}/scans`. A token
+  only adds products to its own session's till cart, until the session ends (Disconnect on either side, a new code
+  on that till, or 12 hours). Scans are saved under `businesses/{id}/scannerSessions/{sessionId}/scans`; the till
+  listens (firestore.rules). Nothing is sold until the cashier charges.
+
+Deploy the rules after updating: `npx firebase-tools deploy --only firestore:rules`.
+
 ## Online payments in the selling app (Xendit)
 
 With `XENDIT_SECRET_KEY` set, the till offers **Cash, E-wallet, Card, Bank transfer**. The last three are paid

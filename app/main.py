@@ -69,8 +69,12 @@ async def limit_rate(request: Request, call_next):
     if request.method == "OPTIONS" or path == "/api/health":
         return await call_next(request)
     authorization = request.headers.get("authorization", "")
-    caller = rate_limit.caller_key(authorization, request.client.host if request.client else "unknown")
-    for limit in rate_limit.limits_for(request.method, path, signed_in=caller.startswith("u:")):
+    client_ip = request.client.host if request.client else "unknown"
+    caller = rate_limit.caller_key(authorization, client_ip, request.headers.get("x-scanner-token", ""))
+    limits = rate_limit.limits_for(request.method, path, signed_in=caller.startswith("u:"), scanner=caller.startswith("s:"))
+    if path.endswith("/pos/scanner/pair"):
+        caller = f"ip:{client_ip}"  # guessing codes is limited per network address, whatever is sent
+    for limit in limits:
         wait = await run_in_threadpool(rate_limit.hit, caller, limit)
         if wait is not None:
             return JSONResponse(
@@ -98,8 +102,9 @@ BUSINESS_URL = re.compile(r"^/api/v1/businesses/([^/]+)")
 READ_ONLY_POSTS = ("/orders/quote",)  # POSTs that don't change anything
 # Writes that only change stock (stock records, walk-in sales, the selling app)
 STOCK_ONLY_URL = re.compile(r"^/api/v1/businesses/[^/]+/(inventory|sales|pos)(/|$)")
-# Messages: their controllers clear exactly the chat caches they change, so nothing else is made outdated
-CHAT_URL = re.compile(r"^/api/v1/businesses/[^/]+/(chat|conversations)(/|$)")
+# Messages: their controllers clear exactly the chat caches they change, so nothing else is made outdated.
+# Phone scans only put products in a till's cart: nothing cached changes.
+CHAT_URL = re.compile(r"^/api/v1/businesses/[^/]+/(chat|conversations|pos/scanner-sessions)(/|$)")
 
 
 @app.middleware("http")

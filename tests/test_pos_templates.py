@@ -12,12 +12,13 @@ from tests.test_pos import TODAY, checkout, shop  # noqa: F401 (shop is a fixtur
 
 def test_catalog_gets_category_names(monkeypatch):
     """Names are added after the cached catalog is read, so a renamed category shows at once."""
-    monkeypatch.setattr(pos_controller, "_build_catalog", lambda db, access, today: [
+    monkeypatch.setattr(pos_controller, "_build_catalog", lambda db, business, today: [
         PosProduct(id="p1", product_name="Latte", category_id="c1"),
         PosProduct(id="p2", product_name="Mystery"),
     ])
     monkeypatch.setattr(pos_controller, "list_categories", lambda db: [Category(id="c1", category_name="Coffee")])
-    catalog = pos_controller.get_catalog(None, SimpleNamespace(business_id="b1"), datetime.date(2026, 10, 2))
+    access = SimpleNamespace(business_id="b1", business=SimpleNamespace(id="b1"))
+    catalog = pos_controller.get_catalog(None, access, datetime.date(2026, 10, 2))
     assert [(p.product_name, p.category_name) for p in catalog] == [("Latte", "Coffee"), ("Mystery", "")]
 
 

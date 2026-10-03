@@ -28,6 +28,10 @@ READS = Limit("read", 600, 60)  # 10 a second on average: plenty for a busy scre
 WRITES = Limit("write", 120, 60)  # saving, sending, ordering
 UPLOADS = Limit("upload", 30, 60)
 SIGN_IN_FREE = Limit("anonymous", 120, 60)  # requests without a login (health checks, webhooks)
+# Pairing a phone scanner needs no login, only the till's one-time code: few tries, so codes cannot be guessed
+PAIRING = Limit("pair", 10, 60)
+# A paired phone scanner (its token): about one scan a second, with room for quick bursts
+SCANNER = Limit("scanner", 90, 60)
 
 # Expensive paths get their own, lower limits: (path contains, limit)
 SPECIAL = [
@@ -38,13 +42,19 @@ _memory: dict[str, tuple[int, float]] = {}
 _lock = threading.Lock()
 
 
-def caller_key(authorization: str, client_ip: str) -> str:
+def caller_key(authorization: str, client_ip: str, scanner_token: str = "") -> str:
     if authorization.lower().startswith("bearer "):
         return "u:" + hashlib.sha256(authorization[7:].encode()).hexdigest()[:24]
+    if scanner_token:
+        return "s:" + hashlib.sha256(scanner_token.encode()).hexdigest()[:24]
     return f"ip:{client_ip}"
 
 
-def limits_for(method: str, path: str, signed_in: bool) -> list[Limit]:
+def limits_for(method: str, path: str, signed_in: bool, scanner: bool = False) -> list[Limit]:
+    if path.endswith("/pos/scanner/pair"):
+        return [PAIRING, SIGN_IN_FREE]
+    if scanner:
+        return [SCANNER]
     if not signed_in:
         return [SIGN_IN_FREE]
     found = [READS if method in ("GET", "HEAD", "OPTIONS") else WRITES]
