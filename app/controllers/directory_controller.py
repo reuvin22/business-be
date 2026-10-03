@@ -12,8 +12,9 @@ from app.controllers.customer_price_controller import list_prices_for_customer
 from app.controllers.delivery_zone_controller import list_delivery_zones
 from app.controllers.location_controller import list_locations
 from app.controllers.payment_method_controller import list_accepted_payments
-from app.controllers.pricing import is_current
+from app.controllers.pricing import is_current, trusted_buyer_types
 from app.controllers.product_controller import list_prices, list_variants
+from app.controllers.relationship_controller import is_connected
 from app.controllers.review_controller import list_reviews
 from app.controllers.trust_controller import list_certifications, list_social_links
 from app.core import cache
@@ -26,6 +27,7 @@ from app.schemas.business import BusinessPublicDetails, BusinessSummary
 from app.schemas.contact import PublicContact
 from app.schemas.directory import MyCustomerPrice, PublicProduct, PublicProfile
 from app.schemas.enums import ActiveStatus, BusinessStatus, BusinessType, ProductStatus, VerificationStatus, Visibility
+from app.schemas.payment import PublicPaymentTerms
 from app.schemas.trust import PublicCertification
 from app.schemas.user import CurrentUser
 from app.utils.parallel import run_parallel
@@ -126,7 +128,7 @@ def _build_public_profile(db: Client, business_id: str) -> PublicProfile:
         supplier_profile=supplier_profile,
         delivery=delivery,
         delivery_zones=delivery_zones,
-        payment_terms=payment_terms,
+        payment_terms=PublicPaymentTerms.model_validate(payment_terms),
         return_policy=return_policy,
         payment_types=[accepted.payment_type for accepted in accepted_payments],
         accepted_payments=accepted_payments,
@@ -160,6 +162,11 @@ def _build_public_products(
 ) -> list[PublicProduct]:
     _get_active_business(db, business_id)
     customer_prices = list_prices_for_customer(db, business_id, buyer_business_id) if buyer_business_id else []
+    # Prices limited to a customer type (e.g. distributors only) are only shown to connected buyers of that type
+    buyer = load_business(db, buyer_business_id) if buyer_business_id else None
+    buyer_types = (
+        trusted_buyer_types(is_connected(db, business_id, buyer.id), buyer.business_types) if buyer is not None else []
+    )
 
     public = products_collection(db, business_id).where(filter=FieldFilter("visibility", "==", Visibility.PUBLIC.value))
     public_and_active = public.where(filter=FieldFilter("status", "==", ProductStatus.ACTIVE.value))
@@ -175,7 +182,9 @@ def _build_public_products(
         prices = [
             p
             for p in all_prices
-            if p.status == ActiveStatus.ACTIVE and is_current(p.effective_from, p.effective_until, today)
+            if p.status == ActiveStatus.ACTIVE
+            and is_current(p.effective_from, p.effective_until, today)
+            and (p.customer_type is None or p.customer_type in buyer_types)
         ]
         mine = [
             MyCustomerPrice.model_validate(cp)

@@ -4,12 +4,12 @@ import datetime
 
 from app.models.product import Price, Variant
 from app.models.profile import Brand, DeliveryZone, Location, SocialLink
-from app.models.settings import DeliverySettings, PaymentTerms, ReturnPolicy, SupplierProfile
+from app.models.settings import DeliverySettings, ReturnPolicy, SupplierProfile
 from app.schemas.base import CamelModel
 from app.schemas.business import BusinessPublicDetails
 from app.schemas.contact import PublicContact
 from app.schemas.enums import PaymentType
-from app.schemas.payment import AcceptedPayment
+from app.schemas.payment import AcceptedPayment, PublicPaymentTerms
 from app.schemas.product import OrderRules, ProductImage, Specification
 from app.schemas.trust import PublicCertification
 
@@ -22,7 +22,7 @@ class PublicProfile(CamelModel):
     supplier_profile: SupplierProfile
     delivery: DeliverySettings
     delivery_zones: list[DeliveryZone]
-    payment_terms: PaymentTerms
+    payment_terms: PublicPaymentTerms
     return_policy: ReturnPolicy
     payment_types: list[PaymentType]  # only the types; account numbers stay private
     accepted_payments: list[AcceptedPayment] = []  # the types with their banks / e-wallets (no accounts)

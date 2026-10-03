@@ -8,15 +8,20 @@ from fastapi import HTTPException
 from app.controllers import chat_controller
 from app.core import crypto, realtime
 from app.schemas.chat import ChatMessageIn
-from app.schemas.enums import MemberRole, Permission
-from tests.conftest import create_business, login_as
+from app.schemas.enums import MemberRole, Permission, VerificationStatus
+from tests.conftest import create_business, join_team, login_as
 
 
-def member(business_id="b1", uid="u1", permissions=(Permission.SEND_MESSAGES,), name="Ana"):
+def member(business_id="b1", uid="u1", permissions=(Permission.SEND_MESSAGES,), name="Ana", verified=True):
     """A stand-in for BusinessAccess (who is calling, for which business)."""
     return SimpleNamespace(
         business_id=business_id,
-        business=SimpleNamespace(business_name="Acme", business_logo=""),
+        business=SimpleNamespace(
+            business_name="Acme",
+            business_logo="",
+            chat_key_version=0,
+            verification_status=VerificationStatus.VERIFIED if verified else VerificationStatus.UNVERIFIED,
+        ),
         member=SimpleNamespace(display_name=name, role=MemberRole.STAFF),
         user=SimpleNamespace(uid=uid, name="", email="ana@test.com"),
         can=lambda permission: permission in permissions,
@@ -30,7 +35,7 @@ def test_asking_for_access_lets_the_member_read_the_chats(fake_realtime):
     access = chat_controller.get_access(member())
     assert (access.team_path, access.market_path) == ("chat/team/b1/messages", "chat/market/messages")
     assert fake_realtime.get("chatAccess/u1/b1") is True
-    assert access.team_key == realtime.room_key("chat/team/b1/messages")  # to decrypt the messages
+    assert access.team_keys == {"": realtime.room_key("chat/team/b1/messages")}  # to decrypt the messages
 
     realtime.revoke_access("u1", "b1")
     assert fake_realtime.get("chatAccess/u1/b1") is None
@@ -67,7 +72,7 @@ def test_chat_through_the_api(client, fake_realtime):
     access = client.get(f"/api/v1/businesses/{business_id}/chat").json()
     assert access["teamPath"] == f"chat/team/{business_id}/messages"
 
-    client.post(f"/api/v1/businesses/{business_id}/members", json={"email": "staff@test.com", "role": "STAFF"})
+    join_team(client, business_id, "staff@test.com")
     login_as("staff@test.com")
     staff_uid = client.get(f"/api/v1/businesses/{business_id}/chat").json()["uid"]
     response = client.post(f"/api/v1/businesses/{business_id}/chat/team/messages", json={"message": "On my way"})
@@ -87,6 +92,7 @@ def test_direct_messages_move_to_the_realtime_database(fake_realtime, monkeypatc
         id="old1", sender_uid="u2", sender_name="Ben", sender_business_id="b2", message="Hi", created_at=100, updated_at=100
     )
     monkeypatch.setattr(conversation_controller, "messages_collection", lambda db, conversation_id: None)
+    monkeypatch.setattr(conversation_controller, "find_business", lambda db, business_id: None)
     monkeypatch.setattr(conversation_controller.crud, "list_documents", lambda collection, model: [earlier])
     conversation = Conversation(
         id="c1", business_ids=["b1", "b2"], business_names={}, last_read_at={"b1": 150}, created_at=1, updated_at=1
@@ -134,3 +140,23 @@ def test_a_message_can_carry_an_order_between_the_two_businesses(monkeypatch):
     theirs = Conversation(id="c2", business_ids=["b1", "b3"], business_names={})
     with pytest.raises(HTTPException):
         conversation_controller._order_card(None, theirs, "o1")
+
+
+def test_only_verified_businesses_post_in_the_market(fake_realtime):
+    with pytest.raises(HTTPException) as refused:
+        chat_controller.send_market_message(member(verified=False), ChatMessageIn(message="Cheap rice!"))
+    assert refused.value.status_code == 403
+
+
+def test_a_new_key_version_after_someone_leaves(fake_realtime):
+    """Messages sealed after the version went up cannot be read with the old key."""
+    access = member()
+    access.business.chat_key_version = 1
+    chat_controller.send_team_message(access, ChatMessageIn(message="After Ben left"))
+    stored = fake_realtime.newest("chat/team/b1/messages", 5)[0]
+    assert stored["kv"] == "1"
+    assert realtime.unseal("chat/team/b1/messages", stored)["message"] == "After Ben left"
+    with pytest.raises(ValueError):  # the first key (what Ben had) does not open it
+        crypto.open_for_room("chat/team/b1", stored["message"])
+    assert set(chat_controller.get_access(access).team_keys) == {"", "1"}  # current members read both
+

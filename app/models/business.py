@@ -29,6 +29,12 @@ class Business(BusinessIn, FirestoreModel):
     primary_province: str = ""
     rating_average: float = 0
     rating_count: int = 0
+    # Goes up when someone leaves the team, so the chats get new keys (see app/core/realtime.py)
+    chat_key_version: int = 0
+
+
+    def file_urls(self) -> list[str]:
+        return [self.business_logo, self.cover_image]
 
 
 def businesses_collection(db: Client) -> CollectionReference:

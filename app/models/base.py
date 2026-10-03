@@ -18,6 +18,7 @@ class FirestoreModel(CamelModel):
     """
 
     encrypted_fields: ClassVar[tuple[str, ...]] = ()
+    stored_record: ClassVar[bool] = True  # read back from the database (see CamelModel.stored_record)
 
     id: str = ""  # the Firestore document id (not saved inside the document itself)
     created_at: int = 0  # milliseconds since 1970, like Date.now() in JavaScript
@@ -27,6 +28,11 @@ class FirestoreModel(CamelModel):
     def from_snapshot(cls, snapshot: DocumentSnapshot):
         """Builds the model from a document read from Firestore."""
         return cls.model_validate({**cls.decrypt_fields(snapshot.to_dict() or {}), "id": snapshot.id})
+
+    def file_urls(self) -> list[str]:
+        """The uploaded files this record uses. When the record changes or is deleted, files it no longer
+        uses are deleted from storage (see app/controllers/crud.py). Override in models that hold files."""
+        return []
 
     def to_firestore(self) -> dict:
         """The fields to save in Firestore: camelCase names, enums and dates as text, confidential ones encrypted."""

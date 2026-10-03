@@ -14,7 +14,7 @@ from google.cloud.firestore import Client, FieldFilter
 
 from app.controllers import crud
 from app.core import realtime
-from app.dependencies.business_access import BusinessAccess
+from app.dependencies.business_access import BusinessAccess, load_business
 from app.models.activity import Activity, activity_collection
 from app.schemas.enums import ActivityCategory
 from app.utils.helpers import current_time_ms
@@ -59,9 +59,20 @@ def record(
         ref.set(activity.to_firestore())
         # The live copy is encrypted with the feed's key, which the business's members get (see chat access)
         live = f"{realtime.live_path(business_id)}/{ref.id}"
-        realtime.get_store().set(live, realtime.seal(live, activity.model_dump(mode="json", by_alias=True, exclude={"id"})))
+        data = activity.model_dump(mode="json", by_alias=True, exclude={"id"})
+        realtime.get_store().set(live, realtime.seal(live, data, _key_version(db, business_id, by)))
     except Exception:
         logger.exception("Could not record activity %s for business %s", action, business_id)
+
+
+def _key_version(db: Client, business_id: str, by: BusinessAccess) -> str:
+    """The business's current chat key version, for its live feed (see app/core/realtime.py)."""
+    try:
+        business = by.business if by.business_id == business_id else load_business(db, business_id)
+        return realtime.version_of(getattr(business, "chat_key_version", 0) or 0)
+    except Exception:  # noqa: BLE001 - the first version still works for every member
+        logger.warning("Could not read the chat key version of business %s", business_id)
+        return ""
 
 
 def list_activity(

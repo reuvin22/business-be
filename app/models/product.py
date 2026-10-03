@@ -11,7 +11,8 @@ from app.schemas.product import PriceIn, ProductIn, VariantIn
 
 
 class Product(ProductIn, FirestoreModel):
-    pass
+    def file_urls(self) -> list[str]:
+        return [image.image_url for image in self.images]
 
 
 class Variant(VariantIn, FirestoreModel):

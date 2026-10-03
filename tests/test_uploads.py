@@ -6,7 +6,7 @@ from app.controllers.upload_controller import detect_file_type
 from app.core import storage
 from app.core.config import settings
 from app.schemas.product import ProductIn
-from tests.conftest import create_business, login_as
+from tests.conftest import create_business, join_team, login_as
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 100  # the first bytes of every PNG file
 MP4 = b"\x00\x00\x00\x20ftypisom" + b"\x00" * 100  # the first bytes of an MP4 video
@@ -92,7 +92,7 @@ def test_too_big_files_are_refused(client, uploads):
 
 def test_only_people_who_can_edit_can_upload(client, uploads):
     business_id = create_business(client)["id"]
-    client.post(f"/api/v1/businesses/{business_id}/members", json={"email": "staff@test.com", "role": "STAFF"})
+    join_team(client, business_id, "staff@test.com")
 
     login_as("staff@test.com")
     assert upload(client, business_id, PNG).status_code == 403

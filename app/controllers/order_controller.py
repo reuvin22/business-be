@@ -26,16 +26,17 @@ from app.controllers.customer_price_controller import list_prices_for_customer
 from app.controllers.delivery_zone_controller import list_delivery_zones
 from app.controllers.inventory_controller import StockNames, calculate_stock, location_name, new_movement
 from app.controllers.payment_method_controller import list_accepted_payment_types, list_payment_methods
-from app.controllers.pricing import calculate_delivery_fee, check_order_rules, find_unit_price
+from app.controllers.pricing import calculate_delivery_fee, check_order_rules, find_unit_price, trusted_buyer_types
 from app.controllers.product_controller import list_prices
+from app.controllers.relationship_controller import is_connected
 from app.controllers.settings_controller import get_delivery, get_payment_terms
-from app.core import cache
+from app.core import cache, storage
 from app.dependencies.business_access import BusinessAccess
 from app.models.business import Business
 from app.models.inventory import InventoryItem, StockMovement, inventory_document
 from app.models.product import Product, Variant, products_collection, variants_collection
 from app.models.profile import locations_collection
-from app.models.trade import Order, OrderItem, orders_collection
+from app.models.trade import Order, OrderItem, PaymentChange, orders_collection
 from app.schemas.enums import (
     ActivityCategory,
     ActiveStatus,
@@ -47,11 +48,24 @@ from app.schemas.enums import (
     StockMovementType,
     Visibility,
 )
-from app.schemas.order import OrderChargesIn, OrderIn, OrderStatusIn, PaymentStatusIn, Quote, QuoteLine
+from app.schemas.base import PRIVATE_FILE_PREFIX
+from app.schemas.order import (
+    MAX_PAYMENT_PROOFS,
+    OrderChargesIn,
+    OrderIn,
+    OrderStatusIn,
+    PaymentProofIn,
+    PaymentStatusIn,
+    Quote,
+    QuoteLine,
+)
 from app.schemas.payment import PaymentInstructions, payment_kind
 from app.schemas.views import OrderView
 from app.utils.helpers import current_time_ms
 
+
+# How many orders one buyer may have waiting (PENDING) at one seller: stops a flood of fake orders
+MAX_PENDING_ORDERS = 20
 
 # Which status changes each side may make: {current status: [allowed next statuses]}
 SELLER_CHANGES = {
@@ -77,6 +91,7 @@ def build_quote(db: Client, buyer: Business, seller: Business, order_in: OrderIn
 
     today = datetime.date.today()
     customer_prices = list_prices_for_customer(db, seller.id, buyer.id)
+    buyer_types = trusted_buyer_types(is_connected(db, seller.id, buyer.id), buyer.business_types)
     lines: list[QuoteLine] = []
 
     for item in order_in.items:
@@ -103,7 +118,7 @@ def build_quote(db: Client, buyer: Business, seller: Business, order_in: OrderIn
             [cp for cp in customer_prices if cp.product_id == product.id],
             item.variant_id,
             item.quantity,
-            buyer.business_types,
+            buyer_types,
             seller.currency,
             today,
         )
@@ -178,6 +193,14 @@ def create_order(db: Client, access: BusinessAccess, order_in: OrderIn) -> Order
     quote = build_quote(db, access.business, seller, order_in)
     if quote.problems:
         raise bad_request(" ".join(quote.problems))
+    waiting = [
+        o for o in list_orders(db, access, "buying")
+        if o.seller_business_id == seller.id and o.order_status == OrderStatus.PENDING
+    ]
+    if len(waiting) >= MAX_PENDING_ORDERS:
+        raise bad_request(
+            f"You have {len(waiting)} orders waiting for this seller to accept. Wait for them before ordering more."
+        )
 
     now = current_time_ms()
     order_ref = orders_collection(db).document()
@@ -469,13 +492,65 @@ def change_payment_status(db: Client, access: BusinessAccess, order_id: str, pay
     if not (access.can(Permission.MANAGE_SALES_ORDERS) or access.can(Permission.MANAGE_PAYMENTS)):
         raise forbidden("You need the 'orders.sell' or 'payments.manage' permission to do this")
 
+    now = current_time_ms()
     order.payment_status = payment_in.payment_status
-    order.updated_at = current_time_ms()
-    orders_collection(db).document(order_id).update(
-        {"paymentStatus": order.payment_status.value, "updatedAt": order.updated_at}
+    order.updated_at = now
+    # Who said it was paid, and when: the buyer sees the history (and can dispute it with their proof)
+    order.payment_history.append(
+        PaymentChange(
+            payment_status=payment_in.payment_status,
+            by_name=access.member.display_name or access.user.name or access.user.email or "",
+            by_business_id=access.business_id,
+            at=now,
+        )
     )
+    orders_collection(db).document(order_id).set(order.to_firestore())
     _clear_cache(order)
+    _notify(
+        db,
+        access,
+        order,
+        "payment",
+        mine=f"You marked order {order.order_number} as {order.payment_status.value.lower().replace('_', ' ')}",
+        theirs=f"{access.business.business_name} marked order {order.order_number} as {order.payment_status.value.lower().replace('_', ' ')}",
+    )
     return order
+
+
+def add_payment_proof(db: Client, access: BusinessAccess, order_id: str, proof_in: PaymentProofIn) -> Order:
+    """The buyer attaches proof of payment (private files only the two businesses can open)."""
+    order = get_order(db, access, order_id, fresh=True)
+    if order.buyer_business_id != access.business_id:
+        raise bad_request("Only the buyer can attach a proof of payment")
+    access.require(Permission.PLACE_ORDERS)
+    own_folder = f"{PRIVATE_FILE_PREFIX}payment_proofs/{access.business_id}/"
+    if any(not ref.startswith(own_folder) or ".." in ref for ref in proof_in.files):
+        raise bad_request("Upload the proof of payment first (kind=proof)")
+    files = [ref for ref in proof_in.files if ref not in order.payment_proofs]
+    if len(order.payment_proofs) + len(files) > MAX_PAYMENT_PROOFS:
+        raise bad_request(f"An order can have at most {MAX_PAYMENT_PROOFS} proofs of payment")
+
+    order.payment_proofs.extend(files)
+    order.updated_at = current_time_ms()
+    orders_collection(db).document(order_id).set(order.to_firestore())
+    _clear_cache(order)
+    _notify(
+        db,
+        access,
+        order,
+        "payment_proof",
+        mine=f"You sent proof of payment for order {order.order_number}",
+        theirs=f"{access.business.business_name} sent proof of payment for order {order.order_number}",
+    )
+    return order
+
+
+def open_payment_proof(db: Client, access: BusinessAccess, order_id: str, ref: str) -> str:
+    """A 5-minute link to one proof of payment of an order this business is part of (buyer or seller)."""
+    order = get_order(db, access, order_id)
+    if ref not in order.payment_proofs:
+        raise not_found("File")
+    return storage.signed_url(ref)
 
 
 def change_order_charges(db: Client, access: BusinessAccess, order_id: str, charges_in: OrderChargesIn) -> Order:

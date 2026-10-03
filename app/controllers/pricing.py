@@ -34,6 +34,8 @@ def find_unit_price(
     2. Otherwise the price tiers are used: the variant's own tiers if it has any,
        else the product-wide tiers. Of the tiers that fit the quantity, the buyer's
        business type, and today's date, the lowest price is used.
+
+    buyer_types: the business types the seller has accepted for this buyer (see trusted_buyer_types).
     """
     customer_options = [
         cp.price
@@ -129,3 +131,12 @@ def calculate_delivery_fee(
     if delivery.free_delivery_threshold is not None and subtotal >= delivery.free_delivery_threshold:
         fee = 0
     return fee, problems
+
+
+def trusted_buyer_types(connected: bool, buyer_types: list[BusinessType]) -> list[BusinessType]:
+    """The buyer's business types, for prices limited to a type (e.g. distributors only).
+
+    A business writes its own types in its profile, so anyone could call themselves a distributor. Those
+    prices therefore only apply to buyers the seller has accepted as a connection (and so knows)."""
+    return list(buyer_types) if connected else []
+

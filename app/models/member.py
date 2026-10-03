@@ -22,6 +22,9 @@ class Member(FirestoreModel):
     joined_at: int = 0
     # Sellers only: the store (location) they sell from. None = any location.
     location_id: str | None = None
+    # Sellers only: True when this business created the login, so it may set its password. An account the
+    # person already had (and joined by accepting an invitation) is theirs alone: nobody else may change it.
+    account_managed: bool = False
 
     @property
     def user_id(self) -> str:

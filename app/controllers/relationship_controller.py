@@ -55,6 +55,13 @@ def _all_for(db: Client, business_id: str) -> list[Relationship]:
     return cache.cached_models(cache.business_scope(business_id), "relationships", Relationship, read)
 
 
+def is_connected(db: Client, business_id: str, other_id: str) -> bool:
+    """Do the two businesses have an active relationship (the other one accepted)?"""
+    return any(
+        r.status == RelationshipStatus.ACTIVE and other_id in r.business_ids for r in _all_for(db, business_id)
+    )
+
+
 def _save(db: Client, relationship: Relationship) -> None:
     """Saves the relationship and clears both businesses' cached lists."""
     relationships_collection(db).document(relationship.id).set(relationship.to_firestore())

@@ -26,8 +26,17 @@ def get_current_user(
         email=email,
         name=token_data.get("name"),
         picture=token_data.get("picture"),
-        is_admin=bool(email) and email.lower() in settings.admin_email_list,
+        is_admin=is_platform_admin(token_data),
     )
+
+
+def is_platform_admin(token_data: dict) -> bool:
+    """A platform admin has the `admin` custom claim (set with app/scripts/set_admin.py), or one of the
+    ADMIN_EMAILS addresses AND a verified email: otherwise anyone could sign up with an admin's address."""
+    if token_data.get("admin") is True:
+        return True
+    email = (token_data.get("email") or "").lower()
+    return bool(email) and token_data.get("email_verified") is True and email in settings.admin_email_list
 
 
 def require_admin(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:

@@ -73,21 +73,50 @@ def room_of(path: str) -> str:
     raise ValueError(f"No encryption room for {path}")
 
 
-def room_key(path: str) -> str:
+# Key versions. A business's rooms (its team channel, its live feed, and its conversations) get a new key
+# whenever someone who could read them leaves the team (Business.chat_key_version goes up), so a key they kept
+# cannot read anything said after they left. Each message stores the version it was sealed with ("kv");
+# version "" is the first one. Current members get every version, to read the older messages too.
+
+
+def version_of(business_version: int) -> str:
+    return "" if not business_version else str(business_version)
+
+
+def versions_up_to(business_version: int) -> list[str]:
+    return [version_of(v) for v in range(business_version + 1)]
+
+
+def dm_version(first_version: int, second_version: int) -> str:
+    """A conversation's key version: it changes when EITHER business's version does (meta a, then b)."""
+    return "" if not (first_version or second_version) else f"{first_version}.{second_version}"
+
+
+def dm_versions(first_version: int, second_version: int) -> list[str]:
+    return [dm_version(a, b) for a in range(first_version + 1) for b in range(second_version + 1)]
+
+
+def room_key(path: str, version: str = "") -> str:
     """The key (base64) the browser decrypts this room's messages with. Only give it to who may read the room."""
-    return crypto.room_key(room_of(path))
+    return crypto.room_key(room_of(path), version)
 
 
-def seal(path: str, data: dict) -> dict:
+def room_keys(path: str, versions: list[str]) -> dict[str, str]:
+    """{version: key} for every version of the room (see version_of)."""
+    return {version: room_key(path, version) for version in versions}
+
+
+def seal(path: str, data: dict, version: str = "") -> dict:
     """A message (or activity) ready to save at path: what was said is encrypted with the room's key."""
     room = room_of(path)
-    return {**data, **{k: crypto.seal_for_room(room, data[k]) for k in SECRET_FIELDS if data.get(k) is not None}}
+    sealed = {k: crypto.seal_for_room(room, data[k], version) for k in SECRET_FIELDS if data.get(k) is not None}
+    return {**data, **sealed, **({"kv": version} if version else {})}
 
 
 def unseal(path: str, data: dict) -> dict:
     """The message as it was before `seal` (messages saved before encryption are returned as they are)."""
-    room = room_of(path)
-    return {**data, **{k: crypto.open_for_room(room, data[k]) for k in SECRET_FIELDS if k in data}}
+    room, version = room_of(path), str(data.get("kv") or "")
+    return {**data, **{k: crypto.open_for_room(room, data[k], version) for k in SECRET_FIELDS if k in data}}
 
 
 def newest_messages(path: str, limit: int = MESSAGE_LIMIT) -> list[dict]:
@@ -236,7 +265,7 @@ def edit_message(path: str, uid: str, text: str, now: int) -> dict:
         raise PermissionError("You can only edit your own messages")
     if not text.strip() and not message.get("attachments") and not message.get("order"):
         raise ValueError("A message needs some text (or delete it instead)")
-    store.update(path, seal(path, {"message": text.strip(), "editedAt": now}))
+    store.update(path, seal(path, {"message": text.strip(), "editedAt": now}, str(message.get("kv") or "")))
     return {**message, "message": text.strip(), "editedAt": now}
 
 

@@ -1,6 +1,6 @@
-from pydantic import Field
+from pydantic import Field, model_validator
 
-from app.schemas.base import CamelModel, UrlText
+from app.schemas.base import CamelModel, UrlText, require_own_files
 from app.schemas.enums import ActiveStatus
 
 
@@ -12,3 +12,8 @@ class BrandIn(CamelModel):
     logo: UrlText = ""
     website: UrlText = ""
     status: ActiveStatus = ActiveStatus.ACTIVE
+
+    @model_validator(mode="after")
+    def uploaded_logo(self):
+        require_own_files(self, [self.logo], "Brand logo")
+        return self

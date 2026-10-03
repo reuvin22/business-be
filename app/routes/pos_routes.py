@@ -11,6 +11,7 @@ from app.dependencies.auth import get_current_user
 from app.dependencies.business_access import BusinessAccess, get_business_access, get_pos_access
 from app.models.inventory import InventoryItem, StockMovement
 from app.models.member import Member
+from app.schemas.views import SellerAdded
 from app.models.pos import OnlinePaymentView, Receipt
 from app.models.settings import PosSettings
 from app.schemas.pos import (
@@ -50,7 +51,7 @@ def list_sellers(db: Client = Depends(get_db), access: BusinessAccess = Depends(
     return seller_controller.list_sellers(db, access)
 
 
-@router.post("/businesses/{business_id}/sellers", response_model=Member, status_code=status.HTTP_201_CREATED)
+@router.post("/businesses/{business_id}/sellers", response_model=SellerAdded, status_code=status.HTTP_201_CREATED)
 def create_seller(
     seller_in: SellerCreateIn, db: Client = Depends(get_db), access: BusinessAccess = Depends(get_business_access)
 ):

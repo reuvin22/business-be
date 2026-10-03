@@ -12,7 +12,7 @@ from fastapi import HTTPException
 from google.cloud import firestore
 from google.cloud.firestore import Client, DocumentReference, FieldFilter, Transaction
 
-from app.controllers import crud, settings_controller
+from app.controllers import activity_controller, crud, settings_controller
 from app.controllers.category_controller import list_categories
 from app.controllers.crud import bad_request, forbidden, not_found
 from app.controllers.inventory_controller import (
@@ -43,6 +43,7 @@ from app.models.product import Price, Product, Variant, variants_collection
 from app.models.profile import Location, locations_collection
 from app.models.trade import Sale, sales_collection
 from app.schemas.enums import (
+    ActivityCategory,
     ActiveStatus,
     MemberRole,
     MemberStatus,
@@ -72,7 +73,10 @@ from app.utils.helpers import current_time_ms
 from app.utils.parallel import run_parallel
 
 # Sellers may void their own receipts for this long; managers can void any receipt
-SELLER_VOID_WINDOW_MS = 24 * 60 * 60 * 1000
+# A seller may only void their own sale this soon after it (e.g. a mistake at the till). Later, a manager must.
+SELLER_VOID_WINDOW_MS = 15 * 60 * 1000
+# How far the sale date (the till's local date) may be from the server's date: time zones, not backdating
+MAX_DATE_DRIFT_DAYS = 1
 # "All dates" in the receipts list shows this many of the newest receipts
 ALL_DATES_LIMIT = 500
 
@@ -262,7 +266,33 @@ def change_stock(db: Client, access: BusinessAccess, change_in: StockChangeIn) -
         return add_stock_record(db, access, new_record, note=change_in.note)
 
     names = StockNames(product.product_name, variant.variant_name if variant else "", location.location_name)
-    return apply_adjustment(db, access, doc_ref, names, InventoryAdjustIn(change=change_in.change, note=change_in.note))
+    stock = apply_adjustment(db, access, doc_ref, names, InventoryAdjustIn(change=change_in.change, note=change_in.note))
+    if change_in.change < 0:  # stock taken out at the counter: the managers are told
+        name = f"{product.product_name} {variant.variant_name if variant else ''}".strip()
+        activity_controller.record(
+            db,
+            access.business_id,
+            ActivityCategory.SALES,
+            "stock.removed",
+            f"{-change_in.change:g} {name} taken out at {location.location_name}",
+            by=access,
+            detail=change_in.note,
+        )
+    return stock
+
+
+def _record_sale_change(db: Client, access: BusinessAccess, action: str, title: str, receipt: Receipt, reason: str = "") -> None:
+    """Tells the team (activity history and the bell) that a sale was undone, so voids are never silent."""
+    total = f"{access.business.currency} {receipt.total:,.2f}"
+    activity_controller.record(
+        db,
+        access.business_id,
+        ActivityCategory.SALES,
+        action,
+        f"{title} ({total}, sold by {receipt.seller_name or 'a seller'})",
+        by=access,
+        detail=reason,
+    )
 
 
 # ---- Selling --------------------------------------------------------------------------------
@@ -336,6 +366,9 @@ def _price_cart(
     db: Client, access: BusinessAccess, checkout_in: CheckoutIn, receipt_ref: DocumentReference
 ) -> tuple[Location, list[_Line], str, int]:
     """The cart's lines with today's counter prices (nothing is saved yet)."""
+    # The till sends its local date; it may differ from the server's by a time zone, but not more (no backdating)
+    if abs((checkout_in.date - datetime.datetime.now(datetime.UTC).date()).days) > MAX_DATE_DRIFT_DAYS:
+        raise bad_request("The sale date must be today. Check the date on this device.")
     location = _get_location(db, access, checkout_in.location_id)
     currency = access.business.currency
 
@@ -505,9 +538,11 @@ def void_receipt(db: Client, access: BusinessAccess, receipt_id: str, void_in: V
         if receipt.seller_uid != access.user.uid:
             raise forbidden("You can only void your own receipts")
         if current_time_ms() - receipt.created_at > SELLER_VOID_WINDOW_MS:
-            raise forbidden("This receipt is more than a day old. Ask a manager to void it.")
+            raise forbidden("This sale is more than 15 minutes old. Ask a manager to void it.")
 
-    return _void(db.transaction(), db, access, receipt_ref, _stock_refs(db, access, receipt), void_in)
+    voided = _void(db.transaction(), db, access, receipt_ref, _stock_refs(db, access, receipt), void_in)
+    _record_sale_change(db, access, "sale.voided", f"Receipt {voided.receipt_number} voided", voided, void_in.reason)
+    return voided
 
 
 @firestore.transactional
@@ -543,6 +578,7 @@ def delete_receipt(db: Client, access: BusinessAccess, receipt_id: str) -> None:
     if receipt is None:
         raise not_found("Receipt")
     _delete(db.transaction(), db, access, receipt_ref, _stock_refs(db, access, receipt))
+    _record_sale_change(db, access, "sale.deleted", f"Receipt {receipt.receipt_number} deleted", receipt)
 
 
 @firestore.transactional

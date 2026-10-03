@@ -84,7 +84,8 @@ def open_conversation(db: Client, access: BusinessAccess, conversation_id: str) 
     return ConversationWithMessages(
         conversation=conversation,
         messages=_read_messages(conversation),
-        realtime_key=realtime.room_key(realtime.dm_path(conversation_id)),  # one of the two businesses: may read it
+        # One of the two businesses: may read it, every key version
+        realtime_keys=realtime.room_keys(realtime.dm_path(conversation_id), realtime.dm_versions(*_key_versions(db, conversation))),
     )
 
 
@@ -138,7 +139,8 @@ def _send(db: Client, access: BusinessAccess, conversation_id: str, message_in: 
     # The message goes live first; then the conversation list is brought up to date
     store = realtime.get_store()
     messages_path = f"{realtime.dm_path(conversation_id)}/messages"
-    message.id = store.push(messages_path, realtime.seal(messages_path, _to_realtime(message)))
+    version = realtime.dm_version(*_key_versions(db, conversation))
+    message.id = store.push(messages_path, realtime.seal(messages_path, _to_realtime(message), version))
     store.set(f"{realtime.dm_path(conversation_id)}/meta/lastReadAt/{access.business_id}", now)
     conversations_collection(db).document(conversation_id).update(
         Conversation.encrypt_fields(
@@ -233,16 +235,26 @@ def _ensure_realtime(db: Client, conversation: Conversation) -> None:
     path = realtime.dm_path(conversation.id)
     if store.get(f"{path}/meta") is None:
         first, second = conversation.business_ids
+        version = realtime.dm_version(*_key_versions(db, conversation))
         earlier = crud.list_documents(messages_collection(db, conversation.id), Message)
         read_times = {business_id: at for business_id, at in conversation.last_read_at.items() if at}
         store.update(
             path,
             {
                 "meta": {"a": first, "b": second, "lastReadAt": read_times},
-                **{f"messages/{m.id}": realtime.seal(path, _to_realtime(m)) for m in earlier},
+                **{f"messages/{m.id}": realtime.seal(path, _to_realtime(m), version) for m in earlier},
             },
         )
     _realtime_ready.add(conversation.id)
+
+
+def _key_versions(db: Client, conversation: Conversation) -> tuple[int, int]:
+    """The chat key versions of the two businesses, in the order of the conversation (meta a, then b)."""
+    versions = []
+    for business_id in conversation.business_ids:
+        business = find_business(db, business_id)
+        versions.append(business.chat_key_version if business else 0)
+    return versions[0], versions[1]
 
 
 def _to_realtime(message: Message) -> dict:

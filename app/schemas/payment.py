@@ -64,6 +64,17 @@ class PaymentInstructions(CamelModel):
     account_number: str
     provider: str
     instructions: str
+    # When the seller last changed these details. The buyer is warned when that was recently: a scammer
+    # who got into a seller's account would change the account number first.
+    updated_at: int = 0
+
+
+class PublicPaymentTerms(CamelModel):
+    """The payment terms every business can see. The credit limit and notes are the seller's own business."""
+
+    payment_terms: list[PaymentTerm] = []
+    credit_days: int | None = None
+    down_payment_percentage: float | None = None
 
 
 class PaymentTermsIn(CamelModel):

@@ -4,7 +4,7 @@ import datetime
 
 from pydantic import Field, model_validator
 
-from app.schemas.base import CamelModel, UrlText, check_date_order
+from app.schemas.base import CamelModel, UrlText, check_date_order, require_own_files
 from app.schemas.enums import DocumentType, SocialPlatform, VerificationStatus, VerificationType
 
 
@@ -16,11 +16,16 @@ class CertificationIn(CamelModel):
     certificate_number: str = ""
     issue_date: datetime.date | None = None
     expiry_date: datetime.date | None = None
-    document_url: UrlText = ""  # private: only your team and platform admins see it
+    document_url: str = ""  # a private file (uploaded with kind=document): only your team and platform admins
 
     @model_validator(mode="after")
     def check_dates(self):
         check_date_order(self.issue_date, self.expiry_date, "expiry date must be after issue date")
+        return self
+
+    @model_validator(mode="after")
+    def private_copy(self):
+        require_own_files(self, [self.document_url], "Copy of certificate", private_allowed=True)
         return self
 
 
@@ -44,7 +49,7 @@ class DocumentIn(CamelModel):
     """A permit, certificate, ID, contract, ... Only your team and platform admins can see documents."""
 
     document_type: DocumentType
-    file_url: UrlText = Field(min_length=1)
+    file_url: str = Field(min_length=1)  # a private file (uploaded with kind=document)
     file_name: str = ""
     issue_date: datetime.date | None = None
     expiry_date: datetime.date | None = None
@@ -52,6 +57,11 @@ class DocumentIn(CamelModel):
     @model_validator(mode="after")
     def check_dates(self):
         check_date_order(self.issue_date, self.expiry_date, "expiry date must be after issue date")
+        return self
+
+    @model_validator(mode="after")
+    def private_file(self):
+        require_own_files(self, [self.file_url], "File", private_allowed=True)
         return self
 
 

@@ -1,6 +1,6 @@
-from pydantic import Field
+from pydantic import Field, model_validator
 
-from app.schemas.base import CamelModel, UrlText
+from app.schemas.base import CamelModel, UrlText, require_own_files
 from app.schemas.enums import RefundMethod
 
 
@@ -15,6 +15,11 @@ class ReturnPolicyIn(CamelModel):
     defective_goods_policy: str = ""
     policy_description: str = ""  # the full policy, typed in
     policy_file_url: UrlText = ""  # ...and/or as a PDF (uploaded with kind=policy); buyers read it inside the app
+
+    @model_validator(mode="after")
+    def uploaded_pdf(self):
+        require_own_files(self, [self.policy_file_url], "Policy PDF")
+        return self
 
 
 class SupplierProfileIn(CamelModel):

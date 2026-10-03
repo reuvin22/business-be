@@ -14,6 +14,7 @@ def shop(client, monkeypatch):
         "app.controllers.seller_controller.create_account",
         lambda email, password, name: {"uid": ACCOUNTS[email], "email": email, "display_name": name},
     )
+    monkeypatch.setattr("app.controllers.seller_controller.find_user_by_email", lambda email: None)  # a new login
     monkeypatch.setattr("app.controllers.seller_controller.set_account_name", lambda uid, name: None)
     monkeypatch.setattr("app.controllers.seller_controller.set_account_password", lambda uid, password: None)
 
@@ -21,7 +22,7 @@ def shop(client, monkeypatch):
     product_id, location_id = create_product_with_stock(client, business_id, stock=100)
     response = client.post(
         f"/api/v1/businesses/{business_id}/sellers",
-        json={"displayName": "Ana", "email": "seller@test.com", "password": "secret123", "locationId": location_id},
+        json={"displayName": "Ana", "email": "seller@test.com", "password": "secret-pass-123", "locationId": location_id},
     )
     assert response.status_code == 201, response.text
     return {"business_id": business_id, "product_id": product_id, "location_id": location_id}
@@ -166,7 +167,7 @@ def test_sellers_are_managed_apart_from_the_team(client, shop):
     seller_url = f"/api/v1/businesses/{business_id}/sellers/seller-uid"
     response = client.put(seller_url, json={"displayName": "Ana", "locationId": None, "status": "SUSPENDED"})
     assert response.status_code == 200, response.text
-    assert client.put(f"{seller_url}/password", json={"password": "newpass1"}).status_code == 204
+    assert client.put(f"{seller_url}/password", json={"password": "new-password-1"}).status_code == 204
 
     login_as("seller@test.com")
     assert client.get("/api/v1/pos/businesses").json() == []

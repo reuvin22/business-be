@@ -36,6 +36,10 @@ class LegalInfo(LegalIn, FirestoreModel):
     verification_status: VerificationStatus = VerificationStatus.UNVERIFIED  # set by platform admins
 
 
+    def file_urls(self) -> list[str]:
+        return list(self.legal_document_urls)
+
+
 class DeliverySettings(DeliverySettingsIn, FirestoreModel):
     pass
 
@@ -46,7 +50,8 @@ class PaymentTerms(PaymentTermsIn, FirestoreModel):
 
 
 class ReturnPolicy(ReturnPolicyIn, FirestoreModel):
-    pass
+    def file_urls(self) -> list[str]:
+        return [self.policy_file_url]
 
 
 class SupplierProfile(SupplierProfileIn, FirestoreModel):

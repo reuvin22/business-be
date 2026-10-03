@@ -226,6 +226,35 @@ Setup:
    and copy the **verification token**.
 3. Set `XENDIT_SECRET_KEY` and `XENDIT_WEBHOOK_TOKEN` in `.env` and on Render. Never put the secret key in a frontend.
 
+## Security rules (from the security review)
+
+- **Joining a team takes consent.** Adding a member, or a seller whose email already has an account, sends an
+  invitation (`invitations/{businessId}_{uid}`); they accept or decline under My businesses (`/me/invitations`).
+- **Seller passwords.** A business may only set the password of a seller login it created (`Member.account_managed`)
+  that no other business uses. Setting it signs the account out everywhere.
+- **Permissions.** Members can only give permissions they have; only the owner gives "manage team" and "payments",
+  or changes members who have them (`member_controller.check_can_grant / check_can_manage`).
+- **Admins** need the `admin` custom claim (`python -m app.scripts.set_admin email`) or a *verified* email in
+  `ADMIN_EMAILS`. Disabled accounts and revoked sessions are refused (`firebase._session_still_valid`).
+- **Private files.** Permits, IDs, certificates, and proofs of payment go to `R2_PRIVATE_BUCKET` (no public access),
+  saved as `private:<key>`, and are opened with 5-minute signed links (`GET /businesses/{id}/files/open`,
+  `GET /admin/files/open`, `GET /businesses/{id}/orders/{orderId}/payment-proof`).
+- **Only SIRIS files.** Logos, product media, chat photos, and the policy PDF must be files uploaded to SIRIS
+  (`R2_PUBLIC_URL`, or `R2_OLD_PUBLIC_URLS`), never links to other websites (`schemas/base.require_own_files`).
+- **Prices for a customer type** apply only to buyers the seller is connected with (`pricing.trusted_buyer_types`).
+  The public profile never shows the credit limit or payment-term notes.
+- **Selling app.** Sellers can void their own sales for 15 minutes; every void, deleted receipt, and stock removal
+  is reported to the team (activity category SALES). The sale date must be today (within a day, for time zones).
+- **Limits.** Per-caller rate limits (`app/core/rate_limit.py`, 429), 1 GB of uploads per business per day,
+  20 waiting orders per buyer per seller, 5 owned businesses per account, market posts by verified businesses only,
+  20,000 characters per text field.
+- **Deleted means deleted.** Files a record no longer uses are removed from R2 (`FirestoreModel.file_urls`), and a
+  deleted business's folders go too.
+- **Hidden in production.** `/docs` only with `API_DOCS=true`; the detailed health pages need `?token=HEALTH_TOKEN`.
+  Forwarded IP headers are only trusted from private networks (`FORWARDED_ALLOW_IPS` in the Dockerfile).
+- **Chat keys rotate** when someone leaves the team (`Business.chat_key_version`), and the master key can be changed
+  (`DATA_ENCRYPTION_OLD_KEYS`, then `python -m app.scripts.encrypt_existing --apply`).
+
 ## Encryption of confidential data
 
 Confidential data is encrypted at rest with AES-256-GCM (`app/core/crypto.py`), using `DATA_ENCRYPTION_KEY`:

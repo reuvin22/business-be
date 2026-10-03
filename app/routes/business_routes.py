@@ -1,11 +1,12 @@
 from fastapi import APIRouter, Depends, status
 from google.cloud.firestore import Client
 
-from app.controllers import business_controller, member_controller
+from app.controllers import business_controller, invitation_controller, member_controller
 from app.core.firebase import get_db
 from app.dependencies.auth import get_current_user
 from app.dependencies.business_access import BusinessAccess, get_business_access
 from app.models.business import Business
+from app.models.invitation import Invitation
 from app.models.member import Member
 from app.schemas.business import BusinessIn, MyRole
 from app.schemas.member import MemberAddIn, MemberUpdateIn
@@ -66,7 +67,7 @@ def list_members(db: Client = Depends(get_db), access: BusinessAccess = Depends(
     return member_controller.list_members(db, access)
 
 
-@router.post("/{business_id}/members", response_model=Member, status_code=status.HTTP_201_CREATED)
+@router.post("/{business_id}/members", response_model=Invitation, status_code=status.HTTP_201_CREATED)
 def add_member(
     member_in: MemberAddIn, db: Client = Depends(get_db), access: BusinessAccess = Depends(get_business_access)
 ):
@@ -86,3 +87,18 @@ def update_member(
 @router.delete("/{business_id}/members/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 def remove_member(user_id: str, db: Client = Depends(get_db), access: BusinessAccess = Depends(get_business_access)):
     member_controller.remove_member(db, access, user_id)
+
+
+# ---- Invitations (nobody joins a team without accepting) --------------------------------------
+
+
+@router.get("/{business_id}/invitations", response_model=list[Invitation])
+def list_invitations(db: Client = Depends(get_db), access: BusinessAccess = Depends(get_business_access)):
+    """Invitations this business sent that are still waiting for an answer."""
+    return invitation_controller.list_for_business(db, access)
+
+
+@router.delete("/{business_id}/invitations/{invitation_id}", status_code=status.HTTP_204_NO_CONTENT)
+def cancel_invitation(invitation_id: str, db: Client = Depends(get_db), access: BusinessAccess = Depends(get_business_access)):
+    invitation_controller.cancel(db, access, invitation_id)
+

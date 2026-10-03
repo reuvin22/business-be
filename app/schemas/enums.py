@@ -170,6 +170,7 @@ class ActivityCategory(StrEnum):
     MESSAGES = "MESSAGES"
     CONNECTIONS = "CONNECTIONS"
     ORDERS = "ORDERS"
+    SALES = "SALES"  # voided or deleted receipts, and stock taken out at the counter (so managers see them)
 
 
 class MediaType(StrEnum):

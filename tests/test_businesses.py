@@ -1,4 +1,4 @@
-from tests.conftest import create_business, login_as
+from tests.conftest import create_business, join_team, login_as
 
 
 def test_creator_becomes_owner(client):
@@ -24,7 +24,14 @@ def test_team_member_permissions(client):
     assert response.status_code == 201
     assert "inventory.manage" in response.json()["permissions"]
 
+    # An invitation: not on the team until they accept
     login_as("staff@test.com")
+    assert client.get("/api/v1/businesses").json() == []
+    assert client.get(f"/api/v1/businesses/{business_id}").status_code == 404
+    [invitation] = client.get("/api/v1/me/invitations").json()
+    assert invitation["businessId"] == business_id
+    assert client.post(f"/api/v1/me/invitations/{invitation['id']}/accept").status_code == 200
+    assert client.get("/api/v1/me/invitations").json() == []
     assert [b["id"] for b in client.get("/api/v1/businesses").json()] == [business_id]
     # Warehouse staff cannot edit the business profile...
     response = client.put(f"/api/v1/businesses/{business_id}", json={"businessName": "Hacked", "businessTypes": ["OTHER"]})
@@ -78,3 +85,35 @@ def test_delete_business_removes_everything(client):
 
     assert client.delete(f"/api/v1/businesses/{business_id}").status_code == 204
     assert client.get(f"/api/v1/businesses/{business_id}").status_code == 404
+
+
+def test_an_invitation_can_be_declined(client):
+    business_id = create_business(client)["id"]
+    client.post(f"/api/v1/businesses/{business_id}/members", json={"email": "staff@test.com", "role": "STAFF"})
+    assert len(client.get(f"/api/v1/businesses/{business_id}/invitations").json()) == 1
+
+    login_as("staff@test.com")
+    [invitation] = client.get("/api/v1/me/invitations").json()
+    assert client.post(f"/api/v1/me/invitations/{invitation['id']}/decline").status_code == 204
+    assert client.get("/api/v1/businesses").json() == []
+
+    login_as("owner@test.com")
+    assert client.get(f"/api/v1/businesses/{business_id}/invitations").json() == []
+
+
+def test_a_manager_cannot_hand_out_more_than_they_have(client):
+    business_id = create_business(client)["id"]
+    join_team(client, business_id, "staff@test.com", "MANAGER", ["members.manage", "products.manage"])
+
+    login_as("staff@test.com")
+    response = client.post(
+        f"/api/v1/businesses/{business_id}/members",
+        json={"email": "buyer@test.com", "role": "ADMIN", "permissions": ["payments.manage"]},
+    )
+    assert response.status_code == 403
+    response = client.post(
+        f"/api/v1/businesses/{business_id}/members",
+        json={"email": "buyer@test.com", "role": "SALES", "permissions": ["products.manage"]},
+    )
+    assert response.status_code == 201, response.text
+

@@ -6,7 +6,7 @@ from app.controllers.crud import bad_request, forbidden, not_found
 from app.core import realtime
 from app.dependencies.business_access import BusinessAccess
 from app.schemas.chat import ChatAccess, ChatMessage, ChatMessageIn, MessageEditIn
-from app.schemas.enums import Permission
+from app.schemas.enums import Permission, VerificationStatus
 from app.utils.helpers import current_time_ms
 
 
@@ -16,15 +16,16 @@ def get_access(access: BusinessAccess) -> ChatAccess:
     Only active members (not seller accounts) get here, so this is where reading is granted.
     Removing a member, or making them inactive, takes it away again (see member_controller)."""
     realtime.grant_access(access.user.uid, access.business_id)
+    versions = realtime.versions_up_to(access.business.chat_key_version)
     return ChatAccess(
         uid=access.user.uid,
         business_id=access.business_id,
         team_path=realtime.team_path(access.business_id),
         market_path=realtime.MARKET_PATH,
-        # The keys to decrypt them with (this member may read all three)
-        team_key=realtime.room_key(realtime.team_path(access.business_id)),
-        market_key=realtime.room_key(realtime.MARKET_PATH),
-        live_key=realtime.room_key(realtime.live_path(access.business_id)),
+        # The keys to decrypt them with (this member may read all three), every version
+        team_keys=realtime.room_keys(realtime.team_path(access.business_id), versions),
+        market_keys=realtime.room_keys(realtime.MARKET_PATH, [""]),
+        live_keys=realtime.room_keys(realtime.live_path(access.business_id), versions),
     )
 
 
@@ -34,8 +35,11 @@ def send_team_message(access: BusinessAccess, message_in: ChatMessageIn) -> Chat
 
 
 def send_market_message(access: BusinessAccess, message_in: ChatMessageIn) -> ChatMessage:
-    """Posts in the public market channel, in the name of the business."""
+    """Posts in the public market channel, in the name of the business. Only verified businesses may post:
+    every business reads the market, so a fake look-alike business could reach everyone there."""
     access.require(Permission.SEND_MESSAGES)
+    if access.business.verification_status != VerificationStatus.VERIFIED:
+        raise forbidden("Only verified businesses can post in the market. Request verification in Profile.")
     return _post(access, realtime.MARKET_PATH, message_in)
 
 
@@ -87,5 +91,7 @@ def _post(access: BusinessAccess, path: str, message_in: ChatMessageIn) -> ChatM
         created_at=current_time_ms(),
     )
     data = message.model_dump(mode="json", by_alias=True, exclude={"id"})
-    message.id = realtime.get_store().push(path, realtime.seal(path, data))
+    # The team channel uses the business's current key; the public market has one key
+    version = realtime.version_of(access.business.chat_key_version) if path != realtime.MARKET_PATH else ""
+    message.id = realtime.get_store().push(path, realtime.seal(path, data, version))
     return message

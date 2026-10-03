@@ -15,7 +15,7 @@ from google.api_core.exceptions import FailedPrecondition
 from google.cloud.firestore import CollectionReference, DocumentReference, DocumentSnapshot, Query
 from pydantic import BaseModel
 
-from app.core import cache
+from app.core import cache, storage
 from app.models.base import FirestoreModel
 from app.utils.helpers import current_time_ms
 
@@ -129,15 +129,22 @@ def update_document(
     item = model_class(**{**existing.model_dump(), **data.model_dump(), **extra_fields, "updated_at": current_time_ms()})
     doc_ref.set(item.to_firestore())
     cache.bump(cache.scope_for_path(doc_ref.path))
+    storage.delete_removed(existing.file_urls(), item.file_urls())  # e.g. a replaced photo
     return item
 
 
-def delete_document(collection: CollectionReference, doc_id: str, what: str = "Item") -> None:
+def delete_document(
+    collection: CollectionReference, doc_id: str, what: str = "Item", model_class: type[FirestoreModel] | None = None
+) -> None:
+    """Deletes the document. Given the model class, the files it used are deleted from storage too."""
     doc_ref = collection.document(doc_id)
-    if not doc_ref.get().exists:
+    snapshot = doc_ref.get()
+    if not snapshot.exists:
         raise not_found(what)
     doc_ref.delete()
     cache.bump(cache.scope_for_path(doc_ref.path))
+    if model_class is not None:
+        storage.delete_removed(model_class.from_snapshot(snapshot).file_urls(), [])
 
 
 def save_single_document(
@@ -157,4 +164,5 @@ def save_single_document(
     )
     doc_ref.set(item.to_firestore())
     cache.bump(cache.scope_for_path(doc_ref.path))
+    storage.delete_removed(existing.file_urls(), item.file_urls())
     return item

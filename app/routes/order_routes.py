@@ -11,7 +11,8 @@ from app.dependencies.business_access import BusinessAccess, get_business_access
 from app.models.network import Review
 from app.models.trade import Order
 from app.schemas.network import ReviewIn
-from app.schemas.order import OrderChargesIn, OrderIn, OrderStatusIn, PaymentStatusIn, Quote
+from app.schemas.order import OrderChargesIn, OrderIn, OrderStatusIn, PaymentProofIn, PaymentStatusIn, Quote
+from app.schemas.upload import OpenedFile
 from app.schemas.views import OrderView
 
 router = APIRouter(prefix="/businesses/{business_id}/orders", tags=["Orders"])
@@ -54,6 +55,22 @@ def change_payment_status(
     order_id: str, payment_in: PaymentStatusIn, db: Client = Depends(get_db), access: BusinessAccess = Depends(get_business_access)
 ):
     return order_controller.change_payment_status(db, access, order_id, payment_in)
+
+
+@router.post("/{order_id}/payment-proof", response_model=Order)
+def add_payment_proof(
+    order_id: str, proof_in: PaymentProofIn, db: Client = Depends(get_db), access: BusinessAccess = Depends(get_business_access)
+):
+    """The buyer attaches proof of payment: files uploaded with kind=proof (private)."""
+    return order_controller.add_payment_proof(db, access, order_id, proof_in)
+
+
+@router.get("/{order_id}/payment-proof", response_model=OpenedFile)
+def open_payment_proof(
+    order_id: str, ref: str, db: Client = Depends(get_db), access: BusinessAccess = Depends(get_business_access)
+):
+    """A 5-minute link to one proof of payment (both businesses of the order may open it)."""
+    return OpenedFile(url=order_controller.open_payment_proof(db, access, order_id, ref))
 
 
 @router.put("/{order_id}/charges", response_model=Order)

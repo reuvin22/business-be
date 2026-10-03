@@ -2,7 +2,7 @@ import datetime
 
 from pydantic import Field, model_validator
 
-from app.schemas.base import CamelModel, UrlText, check_date_order
+from app.schemas.base import CamelModel, UrlText, check_date_order, require_own_files
 from app.schemas.enums import ActiveStatus, BusinessType, MediaType, PriceType, ProductStatus, Visibility
 
 
@@ -66,6 +66,11 @@ class ProductIn(CamelModel):
         primary = next((image for image in photos if image.is_primary), photos[0] if photos else None)
         for image in self.images:
             image.is_primary = image is primary
+        return self
+
+    @model_validator(mode="after")
+    def uploaded_media(self):
+        require_own_files(self, [image.image_url for image in self.images], "Photos and videos")
         return self
 
 

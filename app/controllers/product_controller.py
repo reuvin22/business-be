@@ -4,7 +4,7 @@ from google.cloud.firestore import Client, FieldFilter
 
 from app.controllers import activity_controller, crud
 from app.controllers.crud import bad_request, not_found
-from app.core import cache
+from app.core import cache, storage
 from app.dependencies.business_access import BusinessAccess
 from app.models.category import categories_collection
 from app.models.inventory import inventory_collection
@@ -57,6 +57,7 @@ def delete_product(db: Client, access: BusinessAccess, product_id: str) -> None:
 
     _delete_inventory_where(db, access.business_id, "productId", product_id)
     db.recursive_delete(products_collection(db, access.business_id).document(product_id))
+    storage.delete_removed(product.file_urls(), [])  # its photos and videos
     _record(db, access, product, "deleted")
 
 

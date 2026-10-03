@@ -68,6 +68,15 @@ class PaymentStatusIn(CamelModel):
     payment_status: PaymentStatus
 
 
+MAX_PAYMENT_PROOFS = 10
+
+
+class PaymentProofIn(CamelModel):
+    """The buyer's proof of payment (e.g. a bank transfer screenshot), uploaded with kind=proof."""
+
+    files: list[str] = Field(min_length=1, max_length=5)
+
+
 class OrderChargesIn(CamelModel):
     """The seller can adjust the charges while the order is still PENDING."""
 

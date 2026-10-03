@@ -1,6 +1,8 @@
 """Response shapes that add extra, calculated information to a stored model."""
 
 from app.models.business import Business
+from app.models.invitation import Invitation
+from app.models.member import Member
 from app.models.network import Conversation, Message
 from app.models.product import Price, Product, Variant
 from app.models.trade import Order
@@ -26,7 +28,8 @@ class ConversationView(Conversation):
 class ConversationWithMessages(CamelModel):
     conversation: ConversationView
     messages: list[Message]
-    realtime_key: str = ""  # decrypts the live messages (chat/dm/{id}); only the two businesses get it
+    # {key version: key} to decrypt the live messages (chat/dm/{id}); only the two businesses get them
+    realtime_keys: dict[str, str] = {}
 
 
 class BusinessContext(CamelModel):
@@ -42,3 +45,13 @@ class ProductFull(CamelModel):
     product: Product
     variants: list[Variant]
     prices: list[Price]
+
+
+class SellerAdded(CamelModel):
+    """A new seller: either a new login made for them (member), or, when their email already has an
+    account, an invitation they accept in SIRIS (their own password is never touched)."""
+
+    invited: bool
+    member: Member | None = None
+    invitation: Invitation | None = None
+

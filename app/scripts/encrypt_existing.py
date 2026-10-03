@@ -5,7 +5,8 @@ DATA_ENCRYPTION_KEY (the same key the API uses):
     python -m app.scripts.encrypt_existing --apply  # changes it
 
 New data is encrypted as it is saved; this only catches up the old data. Running it again is harmless:
-values that are already encrypted are skipped.
+values that are already encrypted with the current key are skipped. After a key change (see app/core/crypto.py),
+it also re-encrypts what still uses an old key (DATA_ENCRYPTION_OLD_KEYS).
 
 It covers:
   - Firestore: the `encrypted_fields` of every model (see app/models/base.py)
@@ -22,6 +23,7 @@ from app.core.firebase import get_db
 from app.models.activity import Activity
 from app.models.base import FirestoreModel
 from app.models.business import Business
+from app.models.invitation import Invitation
 from app.models.member import Member
 from app.models.network import Conversation, CustomerPrice, Message, Relationship, VerificationRequest
 from app.models.pos import OnlinePayment, Receipt
@@ -36,6 +38,7 @@ TOP_LEVEL = {
     "conversations": Conversation,
     "verificationRequests": VerificationRequest,
     "orders": Order,
+    "invitations": Invitation,
 }
 NESTED = {
     "members": Member,
@@ -54,9 +57,12 @@ SETTINGS = {"legal": LegalInfo, "paymentTerms": PaymentTerms}  # businesses/{id}
 
 
 def _missing(model: type[FirestoreModel], data: dict) -> dict:
-    """The fields of this document that should be encrypted but are not yet, encrypted."""
-    plain = {alias: data[alias] for alias in model._aliases() if alias in data and not crypto.is_encrypted(data[alias])}
-    return model.encrypt_fields(plain)
+    """The fields of this document that are not encrypted yet (or use an old key), encrypted with the current key."""
+    return {
+        alias: crypto.reencrypt_value(data[alias])
+        for alias in model._aliases()
+        if alias in data and (not crypto.is_encrypted(data[alias]) or crypto.needs_new_key(data[alias]))
+    }
 
 
 def encrypt_firestore(db: Client, apply: bool) -> int:
@@ -91,13 +97,20 @@ def encrypt_realtime(apply: bool) -> int:
     rooms += [f"{realtime.dm_path(conversation_id)}/messages" for conversation_id in (store.get("chat/dm") or {})]
     rooms += [realtime.live_path(business_id) for business_id in (store.get("live") or {})]
     for path in rooms:
+        room = realtime.room_of(path)
         for message_id, message in (store.get(path) or {}).items():
-            plain = {k: message[k] for k in realtime.SECRET_FIELDS if message.get(k) is not None and not crypto.is_encrypted(message[k])}
-            if plain:
+            version = str(message.get("kv") or "")
+            fields = {
+                k: crypto.reseal_for_room(room, message[k], version)
+                for k in realtime.SECRET_FIELDS
+                if message.get(k) is not None
+                and (not crypto.is_encrypted(message[k]) or crypto.room_needs_new_key(room, message[k], version))
+            }
+            if fields:
                 changed += 1
-                print(f"  {path}/{message_id}: {', '.join(plain)}")
+                print(f"  {path}/{message_id}: {', '.join(fields)}")
                 if apply:
-                    store.update(f"{path}/{message_id}", realtime.seal(path, plain))
+                    store.update(f"{path}/{message_id}", fields)
     return changed
 
 

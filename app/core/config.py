@@ -37,6 +37,11 @@ class Settings(BaseSettings):
     r2_bucket: str = ""
     # The bucket's public address, e.g. https://pub-xxxx.r2.dev or https://images.yourdomain.com
     r2_public_url: str = ""
+    # Earlier public addresses of the same files (comma-separated), still accepted as "uploaded to SIRIS"
+    r2_old_public_urls: str = ""
+    # A second bucket with NO public access, for permits, IDs, and legal documents. They are opened with
+    # links that expire after a few minutes, given only to the business's team and platform admins.
+    r2_private_bucket: str = ""
 
     # Xendit (online payments in the selling app: e-wallets, cards, bank transfer).
     # Dashboard > Settings > Developers > API keys (secret key, with "Money-in" write permission),
@@ -44,11 +49,21 @@ class Settings(BaseSettings):
     xendit_secret_key: str = ""
     xendit_webhook_token: str = ""
 
+    # The interactive API docs (/docs, /redoc, /openapi.json). Off unless turned on: in production they would
+    # show everyone a map of every route. Set API_DOCS=true on your own computer.
+    api_docs: bool = False
+    # The detailed health pages (/api/health/r2, /cache, /encryption) need ?token=<this>. Empty = they are off.
+    # (/api/health itself stays open: the hosting platform checks it.)
+    health_token: str = ""
+
     # Encrypts confidential data at rest (Firestore fields, the Redis cache, chat messages). 32 random bytes
     # as base64; see app/core/crypto.py. Required. NEVER lose or change it: data encrypted with it cannot be
     # read without it. Make one with:
     #   python -c "import os, base64; print(base64.b64encode(os.urandom(32)).decode())"
     data_encryption_key: str = ""
+    # After changing the key: the earlier key(s), comma-separated, so old data can still be read until
+    # `python -m app.scripts.encrypt_existing --apply` has re-encrypted it (see app/core/crypto.py)
+    data_encryption_old_keys: str = ""
 
     @property
     def xendit_configured(self) -> bool:

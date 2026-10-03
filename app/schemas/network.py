@@ -5,7 +5,7 @@ import datetime
 
 from pydantic import Field, model_validator
 
-from app.schemas.base import CamelModel, UrlText, check_date_order
+from app.schemas.base import CamelModel, UrlText, check_date_order, require_own_files
 from app.schemas.enums import RelationshipStatus, RelationshipType
 
 
@@ -94,6 +94,11 @@ class StartConversationIn(CamelModel):
             raise ValueError("write a message or add a photo")
         return self
 
+    @model_validator(mode="after")
+    def uploaded_photos(self):
+        require_own_files(self, self.attachments, "Photos")
+        return self
+
 
 class MessageIn(CamelModel):
     message: str = Field(default="", max_length=2000)
@@ -104,6 +109,11 @@ class MessageIn(CamelModel):
     def text_or_photos(self):
         if not self.message.strip() and not self.attachments:
             raise ValueError("write a message or add a photo")
+        return self
+
+    @model_validator(mode="after")
+    def uploaded_photos(self):
+        require_own_files(self, self.attachments, "Photos")
         return self
 
 

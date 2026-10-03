@@ -29,7 +29,8 @@ class Location(LocationIn, FirestoreModel):
 
 
 class Brand(BrandIn, FirestoreModel):
-    pass
+    def file_urls(self) -> list[str]:
+        return [self.logo]
 
 
 class DeliveryZone(DeliveryZoneIn, FirestoreModel):
@@ -48,6 +49,10 @@ class Certification(CertificationIn, FirestoreModel):
     verification_status: VerificationStatus = VerificationStatus.UNVERIFIED  # set by platform admins
 
 
+    def file_urls(self) -> list[str]:
+        return [self.document_url]
+
+
 class SocialLink(SocialLinkIn, FirestoreModel):
     verified: bool = False
 
@@ -58,6 +63,10 @@ class BusinessDocument(DocumentIn, FirestoreModel):
 
     verification_status: VerificationStatus = VerificationStatus.UNVERIFIED  # set by platform admins
     verified_at: int | None = None
+
+
+    def file_urls(self) -> list[str]:
+        return [self.file_url]
     # "uploaded at" is created_at
 
 

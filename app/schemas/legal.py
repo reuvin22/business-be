@@ -1,6 +1,8 @@
 import datetime
 
-from app.schemas.base import CamelModel, UrlText
+from pydantic import model_validator
+
+from app.schemas.base import CamelModel, require_own_files
 from app.schemas.enums import RegistrationType
 
 
@@ -20,4 +22,9 @@ class LegalIn(CamelModel):
     business_permit_expiry: datetime.date | None = None
     license_number: str = ""  # industry-specific license
     license_expiry: datetime.date | None = None
-    legal_document_urls: list[UrlText] = []
+    legal_document_urls: list[str] = []  # private files (uploaded with kind=document)
+
+    @model_validator(mode="after")
+    def private_files(self):
+        require_own_files(self, self.legal_document_urls, "Legal documents", private_allowed=True)
+        return self

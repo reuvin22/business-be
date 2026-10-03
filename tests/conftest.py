@@ -21,8 +21,12 @@ TEST_PROJECT = "demo-my-business"
 
 # A fixed test key (never the real one): confidential fields are encrypted in tests too
 settings.data_encryption_key = "dGVzdC1rZXktdGVzdC1rZXktdGVzdC1rZXktdGVzdCE="
+# Files: whatever the local .env says, tests treat file storage as not set up (any https link is a file)
+settings.r2_public_url = ""
+settings.r2_old_public_urls = ""
 crypto.master_key.cache_clear()
-crypto._derive.cache_clear()
+crypto.old_master_keys.cache_clear()
+crypto._derive_with.cache_clear()
 
 @pytest.fixture(autouse=True)
 def fake_redis():
@@ -131,3 +135,18 @@ def create_product_with_stock(client, business_id: str, stock: float = 100) -> t
     assert response.status_code == 201, response.text
     client.put(f"/api/v1/businesses/{business_id}/delivery", json={"pickupAvailable": True})
     return product["id"], location["id"]
+
+
+def join_team(client, business_id: str, email: str, role: str = "STAFF", permissions=None):
+    """The owner invites someone, and they accept (nobody joins a team without saying yes).
+    Ends logged in as the owner again. Returns the accepted member."""
+    body = {"email": email, "role": role, **({"permissions": permissions} if permissions is not None else {})}
+    response = client.post(f"/api/v1/businesses/{business_id}/members", json=body)
+    assert response.status_code == 201, response.text
+    login_as(email)
+    invitation_id = response.json()["id"]
+    member = client.post(f"/api/v1/me/invitations/{invitation_id}/accept")
+    assert member.status_code == 200, member.text
+    login_as("owner@test.com")
+    return member.json()
+

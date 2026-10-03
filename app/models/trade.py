@@ -36,6 +36,15 @@ class OrderItem(CamelModel):
     subtotal: float
 
 
+class PaymentChange(CamelModel):
+    """One change of an order's payment status: who made it, and when."""
+
+    payment_status: PaymentStatus
+    by_name: str = ""
+    by_business_id: str = ""
+    at: int = 0
+
+
 class Order(FirestoreModel):
     # Encrypted in Firestore: what was bought, for how much, and where it goes (see app/core/crypto.py)
     encrypted_fields = (
@@ -48,6 +57,8 @@ class Order(FirestoreModel):
         "shipping_address",
         "notes",
         "status_reason",
+        "payment_proofs",
+        "payment_history",
     )
 
     order_number: str
@@ -78,6 +89,9 @@ class Order(FirestoreModel):
     fulfillment_location_id: str | None = None  # seller's location the stock comes from
     # True when accepting took the stock out (orders accepted before that only reserved it until shipping)
     stock_taken: bool = False
+    # The buyer's proof of payment (private files, uploaded with kind=proof), and every payment status change
+    payment_proofs: list[str] = []
+    payment_history: list[PaymentChange] = []
     status_reason: str = ""  # why it was cancelled or rejected
     reviewed: bool = False
 

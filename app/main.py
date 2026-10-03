@@ -1,11 +1,13 @@
+import hmac
 import logging
 import re
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.concurrency import run_in_threadpool
 
-from app.core import cache, crypto, storage
+from app.core import cache, crypto, rate_limit, storage
 from app.core.config import settings
 from app.core.firebase import get_firebase_app
 from app.routes import (
@@ -30,7 +32,14 @@ from app.routes import (
 # routers next to these, so apps that use v1 keep working until they update.
 API_V1_PREFIX = "/api/v1"
 
-app = FastAPI(title=settings.app_name, version="1.0.0")
+app = FastAPI(
+    title=settings.app_name,
+    version="1.0.0",
+    # Off in production (API_DOCS): they list every route and field for anyone who looks
+    docs_url="/docs" if settings.api_docs else None,
+    redoc_url="/redoc" if settings.api_docs else None,
+    openapi_url="/openapi.json" if settings.api_docs else None,
+)
 
 # Confidential data is encrypted with DATA_ENCRYPTION_KEY (see app/core/crypto.py). Without it, anything that
 # reads or saves encrypted data fails (nothing is ever saved unencrypted), so say so loudly at startup.
@@ -50,6 +59,26 @@ async def unexpected_errors(request: Request, call_next):
         # Only the kind of error (e.g. ValueError) is shown, never its text, which may hold private details
         detail = f"Something went wrong on the server ({type(error).__name__}). Please try again."
         return JSONResponse(status_code=500, content={"detail": detail})
+
+
+# Too many requests from one caller: 429 (see app/core/rate_limit.py). Added after the error handler and
+# before CORS, so the answer still gets the CORS headers and the browser can show the message.
+@app.middleware("http")
+async def limit_rate(request: Request, call_next):
+    path = request.url.path
+    if request.method == "OPTIONS" or path == "/api/health":
+        return await call_next(request)
+    authorization = request.headers.get("authorization", "")
+    caller = rate_limit.caller_key(authorization, request.client.host if request.client else "unknown")
+    for limit in rate_limit.limits_for(request.method, path, signed_in=caller.startswith("u:")):
+        wait = await run_in_threadpool(rate_limit.hit, caller, limit)
+        if wait is not None:
+            return JSONResponse(
+                status_code=429,
+                content={"detail": f"Too many requests. Please wait {wait} seconds and try again."},
+                headers={"Retry-After": str(wait)},
+            )
+    return await call_next(request)
 
 
 # Lets the React app (running on another port) call this API from the browser
@@ -93,13 +122,20 @@ def health_check():
     return {"status": "ok"}
 
 
-@app.get("/api/health/cache", tags=["Health"])
+def require_health_token(token: str = "") -> None:
+    """The detailed health pages show how the server is set up: only for whoever has HEALTH_TOKEN."""
+    expected = settings.health_token.strip()
+    if not expected or not hmac.compare_digest(token.encode(), expected.encode()):
+        raise HTTPException(status_code=404, detail="Not Found")
+
+
+@app.get("/api/health/cache", tags=["Health"], dependencies=[Depends(require_health_token)])
 def cache_check():
     """Open this in a browser after deploying: is Redis connected, how fast, and how many keys it holds."""
     return cache.status()
 
 
-@app.get("/api/health/firebase", tags=["Health"])
+@app.get("/api/health/firebase", tags=["Health"], dependencies=[Depends(require_health_token)])
 def firebase_check():
     """Open this in a browser after deploying: it says whether the Firebase key could be loaded."""
     try:
@@ -109,14 +145,14 @@ def firebase_check():
     return {"status": "ok"}
 
 
-@app.get("/api/health/encryption", tags=["Health"])
+@app.get("/api/health/encryption", tags=["Health"], dependencies=[Depends(require_health_token)])
 def encryption_check():
     """Open this in a browser after deploying: is DATA_ENCRYPTION_KEY set and working? It never shows the key."""
     result = crypto.check()
     return JSONResponse(status_code=200 if result["status"] == "ok" else 503, content=result)
 
 
-@app.get("/api/health/r2", tags=["Health"])
+@app.get("/api/health/r2", tags=["Health"], dependencies=[Depends(require_health_token)])
 def r2_check():
     """Open this in a browser after deploying: it checks the R2 settings (image uploads) and tries the bucket.
     It never shows the keys."""

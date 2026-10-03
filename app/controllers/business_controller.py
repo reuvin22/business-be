@@ -2,7 +2,7 @@ from google.cloud.firestore import Client, FieldFilter
 
 from app.controllers import crud
 from app.controllers.crud import forbidden
-from app.core import cache, realtime
+from app.core import cache, realtime, storage
 from app.core.permissions import ALL_PERMISSIONS
 from app.dependencies.business_access import BusinessAccess, load_business
 from app.models.business import Business, business_document, businesses_collection
@@ -26,8 +26,15 @@ def list_my_businesses(db: Client, user: CurrentUser) -> list[Business]:
     return cache.cached_models(cache.user_scope(user.uid), "businesses", Business, read)
 
 
+# Fake look-alike businesses are cheap to make; real owners rarely run more than a few
+MAX_OWNED_BUSINESSES = 5
+
+
 def create_business(db: Client, user: CurrentUser, business_in: BusinessIn) -> Business:
     """Creates the business and makes the user its OWNER."""
+    owned = [b for b in list_my_businesses(db, user) if b.owner_uid == user.uid]
+    if len(owned) >= MAX_OWNED_BUSINESSES:
+        raise forbidden(f"An account can own at most {MAX_OWNED_BUSINESSES} businesses")
     now = current_time_ms()
     business_ref = businesses_collection(db).document()
 
@@ -68,6 +75,7 @@ def update_business(db: Client, access: BusinessAccess, business_in: BusinessIn)
     changes = Business.encrypt_fields(business_in.model_dump(mode="json", by_alias=True))
     changes["updatedAt"] = now
     business_document(db, access.business_id).update(changes)
+    storage.delete_removed(access.business.file_urls(), [business_in.business_logo, business_in.cover_image])
     # Each member's "My businesses" list (and each seller's list in the selling app) holds a copy of the
     # business: the new name or logo must show there too, not only on the business's own pages
     cache.bump(*[cache.user_scope(uid) for uid in access.business.member_uids + access.business.seller_uids])
@@ -81,6 +89,11 @@ def delete_business(db: Client, access: BusinessAccess) -> None:
         raise forbidden("Only the owner can delete the business")
     # Firestore does not delete sub-collections on its own; recursive_delete does.
     db.recursive_delete(business_document(db, access.business_id))
+    # Its files go too (chat photos stay: the messages with other businesses are kept)
+    for folder in ("product_img", "business_img", "policy_docs"):
+        storage.delete_folder(f"{folder}/{access.business_id}")
+    for folder in ("private_docs", "payment_proofs"):
+        storage.delete_folder(f"{folder}/{access.business_id}", private=True)
     # Its team channel goes too, and nobody can read its chats anymore (market posts and messages stay)
     realtime.delete_team(access.business_id, access.business.member_uids)
     cache.bump(

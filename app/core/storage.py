@@ -1,8 +1,16 @@
-"""Image and video uploads to Cloudflare R2.
+"""File uploads to Cloudflare R2.
 
 R2 works like Amazon S3, so we talk to it with boto3 (the S3 library).
 Each file gets a random name, so a URL never changes what it points to, and
 browsers and Cloudflare can cache it forever.
+
+Two buckets:
+  - R2_BUCKET (public): product photos and videos, logos, chat photos, return policy PDFs.
+  - R2_PRIVATE_BUCKET (no public access): permits, IDs, certificates, legal documents. They are saved as
+    "private:<key>" and opened with a signed link that expires after a few minutes (see signed_url), which the
+    API gives only to the business's team and platform admins.
+
+Files are deleted from R2 when what uses them is removed (delete_removed, delete_folder).
 """
 
 import logging
@@ -14,6 +22,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import HTTPException, status
 
 from app.core.config import settings
+from app.schemas.base import PRIVATE_FILE_PREFIX
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +70,17 @@ def _get_client():
 
 def _bucket() -> str:
     return settings.r2_bucket.strip()
+
+
+def _private_bucket() -> str:
+    return settings.r2_private_bucket.strip()
+
+
+def private_configured() -> bool:
+    return settings.r2_configured and bool(_private_bucket())
+
+
+SIGNED_LINK_SECONDS = 300  # how long a link to a private file works
 
 
 def health() -> dict:
@@ -169,3 +189,93 @@ def upload_file(data: bytes, content_type: str, folder: str) -> str:
             detail=f"Upload to file storage failed ({type(error).__name__}). Check the R2 settings on the server.",
         ) from error
     return f"{settings.r2_public_url.rstrip('/')}/{key}"
+
+
+# ---- Private files -----------------------------------------------------------------------------
+
+
+def upload_private_file(data: bytes, content_type: str, folder: str) -> str:
+    """Saves the file in the private bucket. Returns "private:<key>" (not a link: see signed_url)."""
+    if not private_configured():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Private documents are not set up yet (R2_PRIVATE_BUCKET is missing on the server)",
+        )
+    key = f"{folder}/{uuid.uuid4().hex}.{EXTENSIONS[content_type]}"
+    try:
+        _get_client().put_object(
+            Bucket=_private_bucket(),
+            Key=key,
+            Body=data,
+            ContentType=content_type,
+            ContentDisposition="inline",
+            CacheControl="private, no-store",  # never kept by shared caches
+        )
+    except (ClientError, BotoCoreError) as error:
+        logger.exception("Upload to the private bucket failed")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"File storage refused the upload ({type(error).__name__}). Check R2_PRIVATE_BUCKET on the server.",
+        ) from error
+    return PRIVATE_FILE_PREFIX + key
+
+
+def private_key(ref: str) -> str:
+    return ref.removeprefix(PRIVATE_FILE_PREFIX)
+
+
+def signed_url(ref: str) -> str:
+    """A link to a private file that works for SIGNED_LINK_SECONDS. Check who is asking BEFORE calling this."""
+    if not private_configured():
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Private documents are not set up yet")
+    return _get_client().generate_presigned_url(
+        "get_object",
+        Params={"Bucket": _private_bucket(), "Key": private_key(ref)},
+        ExpiresIn=SIGNED_LINK_SECONDS,
+    )
+
+
+# ---- Deleting files ----------------------------------------------------------------------------
+
+
+def _locate(url: str) -> tuple[str, str] | None:
+    """(bucket, key) of a file SIRIS stored, or None for anything else (e.g. a link to another website)."""
+    if url.startswith(PRIVATE_FILE_PREFIX):
+        return (_private_bucket(), private_key(url)) if private_configured() else None
+    public = settings.r2_public_url.strip().rstrip("/") + "/"
+    if settings.r2_configured and url.startswith(public):
+        return _bucket(), url.removeprefix(public)
+    return None
+
+
+def delete_file(url: str) -> None:
+    """Deletes a stored file. Never fails what the user was doing: a problem is only logged."""
+    found = _locate(url) if url else None
+    if found is None:
+        return
+    try:
+        _get_client().delete_object(Bucket=found[0], Key=found[1])
+    except Exception:  # noqa: BLE001 - deleting is a clean-up: never break the request
+        logger.exception("Could not delete %s from R2", found[1])
+
+
+def delete_removed(before: list[str], after: list[str]) -> None:
+    """Deletes the files that were in `before` but are no longer in `after` (e.g. a replaced logo)."""
+    for url in set(filter(None, before)) - set(filter(None, after)):
+        delete_file(url)
+
+
+def delete_folder(folder: str, private: bool = False) -> None:
+    """Deletes every file under a folder, e.g. product_img/<businessId> when the business is deleted."""
+    bucket = _private_bucket() if private else _bucket()
+    if not settings.r2_configured or not bucket:
+        return
+    try:
+        client = _get_client()
+        for page in client.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix=f"{folder.rstrip('/')}/"):
+            keys = [{"Key": item["Key"]} for item in page.get("Contents", [])]
+            if keys:
+                client.delete_objects(Bucket=bucket, Delete={"Objects": keys, "Quiet": True})
+    except Exception:  # noqa: BLE001
+        logger.exception("Could not delete the folder %s from R2", folder)
+

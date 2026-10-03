@@ -1,6 +1,6 @@
-from pydantic import Field
+from pydantic import Field, model_validator
 
-from app.schemas.base import CamelModel, EmailText, UrlText
+from app.schemas.base import CamelModel, EmailText, UrlText, require_own_files
 from app.schemas.enums import BusinessSize, BusinessStatus, BusinessType, Permission, VerificationStatus, VerificationType
 
 
@@ -24,6 +24,11 @@ class BusinessIn(CamelModel):
     primary_email: EmailText = ""
     primary_phone: str = ""
     currency: str = Field(default="PHP", min_length=3, max_length=3)
+
+    @model_validator(mode="after")
+    def uploaded_images(self):
+        require_own_files(self, [self.business_logo, self.cover_image], "Logo and cover")
+        return self
 
 
 class BusinessSummary(CamelModel):

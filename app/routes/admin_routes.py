@@ -1,19 +1,23 @@
 """Platform admin tools: verification reviews, categories, and moderation.
-Admins are the emails listed in ADMIN_EMAILS (.env)."""
+Admins have the `admin` custom claim (app/scripts/set_admin.py), or a VERIFIED email listed in ADMIN_EMAILS."""
 
 from fastapi import APIRouter, Depends, status
 from google.cloud.firestore import Client
 
 from app.controllers import category_controller, review_controller, trust_controller, verification_controller
+from app.controllers.crud import not_found
+from app.core import storage
 from app.core.firebase import get_db
 from app.dependencies.auth import require_admin
 from app.models.business import Business
 from app.models.category import Category
 from app.models.network import Review, VerificationRequest
 from app.models.profile import BusinessDocument, Certification
+from app.schemas.base import PRIVATE_FILE_PREFIX
 from app.schemas.category import CategoryIn
 from app.schemas.enums import ReviewStatus, VerificationStatus
 from app.schemas.trust import StatusIn, VerificationReviewIn
+from app.schemas.upload import OpenedFile
 from app.schemas.user import CurrentUser
 
 router = APIRouter(prefix="/admin", tags=["Platform admin"])
@@ -41,6 +45,14 @@ def review_verification_request(
 @router.get("/businesses", response_model=list[Business])
 def list_all_businesses(db: Client = Depends(get_db), admin: CurrentUser = Depends(require_admin)):
     return verification_controller.list_all_businesses(db)
+
+
+@router.get("/files/open", response_model=OpenedFile)
+def open_private_file(ref: str, admin: CurrentUser = Depends(require_admin)):
+    """A 5-minute link to a business's private file (e.g. a permit attached to a verification request)."""
+    if not ref.startswith(PRIVATE_FILE_PREFIX) or ".." in ref:
+        raise not_found("File")
+    return OpenedFile(url=storage.signed_url(ref))
 
 
 @router.get("/businesses/{business_id}/documents", response_model=list[BusinessDocument])

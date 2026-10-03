@@ -117,8 +117,12 @@ def test_a_sale_keeps_the_catalog_cached_but_refreshes_stock(client, firestore_d
     assert [p["productName"] for p in client.get(products_url).json()] == ["Renamed"]
 
 
-def test_cache_status(client_without_db):
-    status = client_without_db.get("/api/health/cache").json()
+def test_cache_status(client_without_db, monkeypatch):
+    from app.core.config import settings
+
+    assert client_without_db.get("/api/health/cache").status_code == 404  # hidden without the token
+    monkeypatch.setattr(settings, "health_token", "secret-token")
+    status = client_without_db.get("/api/health/cache?token=secret-token").json()
     assert status["status"] == "ok"
     assert status["ttlSeconds"] == 86400
 

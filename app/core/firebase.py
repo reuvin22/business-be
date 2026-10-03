@@ -1,5 +1,6 @@
 import json
 import os
+import time
 from pathlib import Path
 
 import firebase_admin
@@ -69,12 +70,41 @@ def get_db() -> Client:
 def verify_token(id_token: str) -> dict | None:
     """Checks a Firebase ID token from the frontend.
 
-    Returns the token's details (uid, email, name, ...) or None when the token is invalid or expired.
+    Returns the token's details (uid, email, name, ...) or None when the token is invalid or expired, its
+    account is disabled, or its sessions were revoked (e.g. after a password change).
     """
     try:
-        return auth.verify_id_token(id_token, app=get_firebase_app())
+        token = auth.verify_id_token(id_token, app=get_firebase_app())
     except (ValueError, auth.InvalidIdTokenError):
         return None
+    return token if _session_still_valid(token) else None
+
+
+# How long to remember an account's "signed out before" time and disabled flag (saves a call per request)
+SESSION_CHECK_SECONDS = 60
+_sessions: dict[str, tuple[float, int, bool]] = {}  # uid -> (checked at, tokens valid after (ms), disabled)
+
+
+def _session_still_valid(token: dict) -> bool:
+    """False when the account was disabled, or signed out everywhere after this token was issued.
+    Like verify_id_token(check_revoked=True), but checked at most once a minute per account."""
+    uid = token["uid"]
+    now = time.monotonic()
+    found = _sessions.get(uid)
+    if found is None or now - found[0] > SESSION_CHECK_SECONDS:
+        try:
+            user = auth.get_user(uid, app=get_firebase_app())
+        except auth.UserNotFoundError:
+            return False
+        found = (now, user.tokens_valid_after_timestamp or 0, user.disabled)
+        _sessions[uid] = found
+    _, valid_after_ms, disabled = found
+    return not disabled and token.get("iat", 0) * 1000 >= valid_after_ms
+
+
+def forget_session(uid: str) -> None:
+    """Check the account again on its next request (e.g. right after revoking its sessions)."""
+    _sessions.pop(uid, None)
 
 
 def find_user_by_email(email: str) -> dict | None:
@@ -98,7 +128,10 @@ def create_account(email: str, password: str, display_name: str) -> dict:
 
 
 def set_account_password(uid: str, password: str) -> None:
+    """Sets a new password and signs the account out everywhere (old sessions stop working)."""
     auth.update_user(uid, password=password, app=get_firebase_app())
+    auth.revoke_refresh_tokens(uid, app=get_firebase_app())
+    forget_session(uid)
 
 
 def set_account_name(uid: str, display_name: str) -> None:

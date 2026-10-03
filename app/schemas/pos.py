@@ -16,7 +16,7 @@ class SellerCreateIn(CamelModel):
 
     display_name: str = Field(min_length=1)
     email: EmailText
-    password: str = Field(min_length=6, max_length=100)  # Firebase needs at least 6 characters
+    password: str = Field(min_length=10, max_length=100)
     location_id: str | None = None  # the store they sell from; None = any location
 
 
@@ -27,7 +27,7 @@ class SellerUpdateIn(CamelModel):
 
 
 class SellerPasswordIn(CamelModel):
-    password: str = Field(min_length=6, max_length=100)
+    password: str = Field(min_length=10, max_length=100)
 
 
 # ---- Selling --------------------------------------------------------------------------------

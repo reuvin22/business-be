@@ -2,7 +2,7 @@
 
 from pydantic import Field, model_validator
 
-from app.schemas.base import CamelModel, UrlText
+from app.schemas.base import CamelModel, UrlText, require_own_files
 
 MAX_PHOTOS = 4  # photos in one message
 
@@ -15,6 +15,11 @@ class ChatMessageIn(CamelModel):
     def text_or_photos(self):
         if not self.message.strip() and not self.attachments:
             raise ValueError("write a message or add a photo")
+        return self
+
+    @model_validator(mode="after")
+    def uploaded_photos(self):
+        require_own_files(self, self.attachments, "Photos")
         return self
 
 
@@ -40,10 +45,11 @@ class ChatAccess(CamelModel):
     business_id: str
     team_path: str  # this business's team channel
     market_path: str  # the public market channel
-    # What is said is encrypted (see app/core/realtime.py): the keys to decrypt each room with (base64, AES-GCM)
-    team_key: str
-    market_key: str
-    live_key: str  # the live activity feed (notifications)
+    # What is said is encrypted (see app/core/realtime.py): the keys to decrypt each room with (base64, AES-GCM),
+    # as {key version: key}. A message says which version it used ("kv"; none = "").
+    team_keys: dict[str, str]
+    market_keys: dict[str, str]
+    live_keys: dict[str, str]  # the live activity feed (notifications)
 
 
 class MessageEditIn(CamelModel):

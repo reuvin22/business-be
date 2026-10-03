@@ -28,4 +28,4 @@ def delete_brand(db: Client, access: BusinessAccess, brand_id: str) -> None:
     used_by = products_collection(db, access.business_id).where(filter=FieldFilter("brandId", "==", brand_id))
     if any(True for _ in used_by.limit(1).stream()):
         raise bad_request("Some products use this brand. Change them first, or set the brand to inactive.")
-    crud.delete_document(brands_collection(db, access.business_id), brand_id, "Brand")
+    crud.delete_document(brands_collection(db, access.business_id), brand_id, "Brand", Brand)

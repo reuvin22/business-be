@@ -56,7 +56,7 @@ def test_verification_flow(client):
     business_id = create_business(client)["id"]
     document = client.post(
         f"/api/v1/businesses/{business_id}/documents",
-        json={"documentType": "DTI_CERTIFICATE", "fileUrl": "https://files.example.com/dti.pdf"},
+        json={"documentType": "DTI_CERTIFICATE", "fileUrl": "private:private_docs/test/dti.pdf"},
     ).json()
 
     response = client.post(

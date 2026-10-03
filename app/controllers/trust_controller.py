@@ -44,7 +44,7 @@ def update_certification(db: Client, access: BusinessAccess, cert_id: str, cert_
 
 def delete_certification(db: Client, access: BusinessAccess, cert_id: str) -> None:
     access.require(Permission.EDIT_BUSINESS)
-    crud.delete_document(certifications_collection(db, access.business_id), cert_id, "Certification")
+    crud.delete_document(certifications_collection(db, access.business_id), cert_id, "Certification", Certification)
 
 
 def set_certification_status(db: Client, business_id: str, cert_id: str, status: VerificationStatus) -> Certification:
@@ -107,7 +107,7 @@ def update_document(db: Client, access: BusinessAccess, document_id: str, docume
 
 def delete_document(db: Client, access: BusinessAccess, document_id: str) -> None:
     access.require(Permission.EDIT_BUSINESS)
-    crud.delete_document(documents_collection(db, access.business_id), document_id, "Document")
+    crud.delete_document(documents_collection(db, access.business_id), document_id, "Document", BusinessDocument)
 
 
 def set_document_status(db: Client, business_id: str, document_id: str, status: VerificationStatus) -> None:
