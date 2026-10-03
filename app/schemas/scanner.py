@@ -6,6 +6,7 @@ from pydantic import Field
 
 from app.models.scanner import ScannerSession
 from app.schemas.base import CamelModel
+from app.schemas.product import ProductFormIn
 
 
 class ScannerSessionStartIn(CamelModel):
@@ -62,15 +63,24 @@ class PhoneStatus(CamelModel):
     actions: list[str] = []
 
 
-class PhoneProductIn(CamelModel):
-    """A new product, registered on the phone after scanning its barcode."""
+class PhoneProductIn(ProductFormIn):
+    """A new product, registered on the phone after scanning its barcode: the same form as the web app's
+    Add product (details, order rules, price tiers, variants, photos, specifications), plus its starting stock."""
 
-    product_name: str = Field(min_length=1, max_length=200)
-    barcode: str = Field(min_length=1, max_length=64)
-    unit: str = Field(default="pcs", min_length=1, max_length=20)
-    price: float = Field(ge=0)  # the selling price for one (a retail price tier)
-    cost_price: float | None = Field(default=None, ge=0)
-    stock: float = Field(default=0, ge=0)  # starting stock at the till's store
+    stock: float = Field(default=0, ge=0)  # starting stock at the session's store (for a product without variants)
+
+
+class Choice(CamelModel):
+    value: str
+    label: str
+
+
+class PhoneProductOptions(CamelModel):
+    """The business's own choices for the phone's product form (the fixed lists are in the app)."""
+
+    categories: list[Choice]
+    brands: list[Choice]
+    currency: str
 
 
 class PhoneProductSaved(CamelModel):

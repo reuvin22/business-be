@@ -2,7 +2,7 @@
 
 import datetime
 
-from fastapi import APIRouter, Depends, Header, status
+from fastapi import APIRouter, Depends, Header, UploadFile, status
 from google.cloud.firestore import Client
 
 from app.controllers import pos_controller, scanner_controller, seller_controller, settings_controller
@@ -32,12 +32,14 @@ from app.schemas.scanner import (
     PairedScanner,
     PairIn,
     PhoneProductIn,
+    PhoneProductOptions,
     PhoneProductSaved,
     PhoneStatus,
     ScanIn,
     ScannerSessionStarted,
     ScannerSessionStartIn,
 )
+from app.schemas.upload import UploadedFile
 from app.schemas.user import CurrentUser
 
 router = APIRouter(tags=["Selling app"])
@@ -253,6 +255,21 @@ def lookup_barcode(
 ):
     """Is this barcode already a product? The phone asks before registering a new one."""
     return scanner_controller.lookup_barcode(db, business_id, session_id, x_scanner_token, barcode)
+
+
+@router.get("/pos/scanner/{business_id}/{session_id}/product-options", response_model=PhoneProductOptions)
+def phone_product_options(business_id: str, session_id: str, x_scanner_token: str = Header(default=""), db: Client = Depends(get_db)):
+    """Categories and brands for the phone's product form."""
+    return scanner_controller.product_options(db, business_id, session_id, x_scanner_token)
+
+
+@router.post("/pos/scanner/{business_id}/{session_id}/images", response_model=UploadedFile, status_code=status.HTTP_201_CREATED)
+def phone_upload_photo(
+    business_id: str, session_id: str, file: UploadFile, x_scanner_token: str = Header(default=""), db: Client = Depends(get_db)
+):
+    """A product photo or video from the phone (form data, field "file"; 25 MB at most)."""
+    url, media_type = scanner_controller.upload_product_photo(db, business_id, session_id, x_scanner_token, file)
+    return UploadedFile(url=url, media_type=media_type)
 
 
 @router.post("/pos/scanner/{business_id}/{session_id}/products", response_model=PhoneProductSaved, status_code=status.HTTP_201_CREATED)

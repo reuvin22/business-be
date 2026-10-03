@@ -125,7 +125,17 @@ def test_registering_a_product_from_the_phone(client, firestore_db):
     headers = {"X-Scanner-Token": paired["token"]}
 
     assert client.get(f"{phone}/lookup", params={"barcode": "4809999"}, headers=headers).json()["productName"] == ""
-    body = {"productName": "Bread", "barcode": "4809999", "price": 45, "costPrice": 30, "stock": 12}
+    body = {
+        "productName": "Bread",
+        "barcode": "4809999",
+        "unit": "pack",
+        "costPrice": 30,
+        "description": "Fresh every morning",
+        "orderRules": {"minimumOrderQuantity": 2, "orderMultiple": 2},
+        "prices": [{"priceType": "RETAIL", "price": 45, "minimumQuantity": 1}],
+        "specifications": [{"name": "Weight", "value": "500 g"}],
+        "stock": 12,
+    }
     saved = client.post(f"{phone}/products", json=body, headers=headers)
     assert saved.status_code == 201, saved.text
     assert client.get(f"{phone}/lookup", params={"barcode": "4809999"}, headers=headers).json()["productName"] == "Bread"
@@ -150,5 +160,15 @@ def test_a_phone_connected_from_the_web_app_only_registers_products(client, fire
     phone = f"/api/v1/pos/scanner/{business_id}/{started.json()['session']['id']}"
     headers = {"X-Scanner-Token": paired["token"]}
     assert client.post(f"{phone}/scans", json={"barcode": "4800001"}, headers=headers).status_code == 400  # no till cart
-    body = {"productName": "Bread", "barcode": "4809999", "price": 45}
+    body = {"productName": "Bread", "barcode": "4809999", "prices": [{"priceType": "RETAIL", "price": 45}]}
     assert client.post(f"{phone}/products", json=body, headers=headers).status_code == 201
+
+
+def test_the_phone_form_takes_what_the_web_form_takes():
+    """The phone registers products with the same form as the web app (one schema), plus starting stock."""
+    from app.schemas.product import ProductFormIn
+    from app.schemas.scanner import PhoneProductIn
+
+    assert set(ProductFormIn.model_fields) <= set(PhoneProductIn.model_fields)
+    assert set(PhoneProductIn.model_fields) - set(ProductFormIn.model_fields) == {"stock"}
+

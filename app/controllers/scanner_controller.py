@@ -17,14 +17,17 @@ import hashlib
 import hmac
 import secrets
 
-from fastapi import HTTPException, status
+from fastapi import HTTPException, UploadFile, status
 from google.api_core.exceptions import AlreadyExists
 from google.cloud.firestore import Client, FieldFilter
 
 from app.controllers import crud, inventory_controller, product_controller
+from app.controllers.brand_controller import list_brands
+from app.controllers.category_controller import list_categories
 from app.controllers.crud import bad_request, forbidden, not_found
 from app.controllers.pos_controller import _get_location as get_location
 from app.controllers.pos_controller import catalog_for
+from app.controllers.upload_controller import upload_business_file
 from app.dependencies.business_access import BusinessAccess, load_access, load_business
 from app.models.business import Business
 from app.models.scanner import (
@@ -37,15 +40,17 @@ from app.models.scanner import (
     scans_collection,
     secret_document,
 )
-from app.schemas.enums import BusinessStatus, Permission, PriceType
+from app.schemas.enums import ActiveStatus, BusinessStatus, MediaType, Permission
 from app.schemas.pos import PosProduct
 from app.schemas.inventory import InventoryIn
-from app.schemas.product import PriceDraft, ProductFormIn
+from app.schemas.product import ProductFormIn
 from app.schemas.scanner import (
     REGISTER_PRODUCT,
     BarcodeLookup,
+    Choice,
     PairedScanner,
     PhoneProductIn,
+    PhoneProductOptions,
     PhoneProductSaved,
     PhoneStatus,
     ScanIn,
@@ -220,29 +225,55 @@ def lookup_barcode(db: Client, business_id: str, session_id: str, token: str, ba
     return BarcodeLookup(barcode=barcode.strip(), product_name=found[1] if found else "")
 
 
-def register_product(db: Client, business_id: str, session_id: str, token: str, product_in: PhoneProductIn) -> PhoneProductSaved:
-    """Registers a new product from the phone, in the name of the person signed in on the till (who must be
-    allowed to manage products, e.g. the owner or an admin): its barcode, selling price, and starting stock."""
+def _managing_access(db: Client, business_id: str, session_id: str, token: str) -> tuple[Business, ScannerSession, BusinessAccess]:
+    """The phone's session, and the person signed in on its till, who must be allowed to manage products."""
     business, session = phone_session(db, business_id, session_id, token)
     access = _till_access(db, business_id, session)
     if access is None or not access.can(Permission.MANAGE_PRODUCTS):
         raise forbidden("The person signed in on the till may not add products")
+    return business, session, access
+
+
+def product_options(db: Client, business_id: str, session_id: str, token: str) -> PhoneProductOptions:
+    """Categories and brands for the phone's product form (the same lists as the web app's)."""
+    business, _, _ = _managing_access(db, business_id, session_id, token)
+    categories = [c for c in list_categories(db) if c.status == ActiveStatus.ACTIVE]
+    by_id = {c.id: c for c in categories}
+
+    def full_name(category) -> str:  # "Food › Beverages › Soft drinks", like the web app
+        parent = by_id.get(category.parent_category_id or "")
+        return f"{full_name(parent)} › {category.category_name}" if parent else category.category_name
+
+    return PhoneProductOptions(
+        categories=sorted((Choice(value=c.id, label=full_name(c)) for c in categories), key=lambda c: c.label.lower()),
+        brands=[Choice(value=b.id, label=b.brand_name) for b in list_brands(db, business_id) if b.status == ActiveStatus.ACTIVE],
+        currency=business.currency,
+    )
+
+
+def upload_product_photo(db: Client, business_id: str, session_id: str, token: str, file: UploadFile) -> tuple[str, MediaType]:
+    """A product photo or video taken on the phone, stored like the web app's (product_img/<business>/...)."""
+    _, _, access = _managing_access(db, business_id, session_id, token)
+    return upload_business_file(access, file, "product")
+
+
+def register_product(db: Client, business_id: str, session_id: str, token: str, product_in: PhoneProductIn) -> PhoneProductSaved:
+    """Registers a new product from the phone, in the name of the person signed in on the till (who must be
+    allowed to manage products, e.g. the owner or an admin), with the same details as the web app's form."""
+    business, session, access = _managing_access(db, business_id, session_id, token)
 
     barcode = product_in.barcode.strip()
-    today = datetime.datetime.now(datetime.UTC).date()
-    taken = _find_item(catalog_for(db, business, today), barcode)
-    if taken is not None:
-        raise bad_request(f"This barcode is already used by {taken[1]}")
+    if not barcode:
+        raise bad_request("Scan the product's barcode first")
+    catalog = catalog_for(db, business, datetime.datetime.now(datetime.UTC).date())
+    for code in [barcode, *(v.barcode.strip() for v in product_in.variants if v.barcode.strip())]:
+        taken = _find_item(catalog, code)
+        if taken is not None:
+            raise bad_request(f"The barcode {code} is already used by {taken[1]}")
 
-    form = ProductFormIn(
-        product_name=product_in.product_name,
-        barcode=barcode,
-        unit=product_in.unit,
-        cost_price=product_in.cost_price,
-        prices=[PriceDraft(price_type=PriceType.RETAIL, price=product_in.price, currency=business.currency, minimum_quantity=1)],
-    )
+    form = ProductFormIn.model_validate(product_in.model_dump(exclude={"stock"}) | {"barcode": barcode})
     saved = product_controller.save_product_full(db, access, form)
-    if product_in.stock > 0:
+    if product_in.stock > 0 and not saved.variants:
         stock = InventoryIn(product_id=saved.product.id, location_id=session.location_id, quantity=product_in.stock)
         inventory_controller.add_stock_record(db, access, stock, note="Registered with the phone scanner")
     return PhoneProductSaved(product_id=saved.product.id, product_name=saved.product.product_name)
