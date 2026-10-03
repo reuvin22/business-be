@@ -14,6 +14,10 @@ Layout:
   notificationSeen/{uid}/{businessId}          when this user last opened the notifications (the browser writes it)
 
 Messages are ordered by their createdAt field (indexed in the rules).
+
+What is said is encrypted (see `seal`): the text, photos, and order card of a message, and the title and
+detail of an activity. Each room (a team channel, the market, a conversation, a live feed) has its own key;
+the API gives it only to users who may read that room, and the browser decrypts with it.
 """
 
 import itertools
@@ -23,6 +27,7 @@ from typing import Protocol
 from firebase_admin import db as firebase_db
 from firebase_admin import exceptions as firebase_exceptions
 
+from app.core import crypto
 from app.core.firebase import get_firebase_app
 
 MESSAGE_LIMIT = 200  # how many of the newest messages a chat shows
@@ -48,6 +53,46 @@ def dm_path(conversation_id: str) -> str:
 def live_path(business_id: str) -> str:
     """A business's live activity feed (notifications), read by its members like its chats."""
     return f"live/{business_id}/activity"
+
+
+# ---- Encryption of what is said ---------------------------------------------------------------
+
+# The fields that hold what was said; everything else (who, when) stays readable for the rules and sorting
+SECRET_FIELDS = ("message", "attachments", "order", "title", "detail")
+
+
+def room_of(path: str) -> str:
+    """The room a path belongs to, e.g. chat/dm/abc/messages/m1 -> chat/dm/abc. Each room has its own key."""
+    parts = path.strip("/").split("/")
+    if parts[:2] == ["chat", "market"]:
+        return "chat/market"
+    if parts[0] == "chat" and len(parts) >= 3 and parts[1] in ("team", "dm"):
+        return "/".join(parts[:3])
+    if parts[0] == "live" and len(parts) >= 2:
+        return "/".join(parts[:2])
+    raise ValueError(f"No encryption room for {path}")
+
+
+def room_key(path: str) -> str:
+    """The key (base64) the browser decrypts this room's messages with. Only give it to who may read the room."""
+    return crypto.room_key(room_of(path))
+
+
+def seal(path: str, data: dict) -> dict:
+    """A message (or activity) ready to save at path: what was said is encrypted with the room's key."""
+    room = room_of(path)
+    return {**data, **{k: crypto.seal_for_room(room, data[k]) for k in SECRET_FIELDS if data.get(k) is not None}}
+
+
+def unseal(path: str, data: dict) -> dict:
+    """The message as it was before `seal` (messages saved before encryption are returned as they are)."""
+    room = room_of(path)
+    return {**data, **{k: crypto.open_for_room(room, data[k]) for k in SECRET_FIELDS if k in data}}
+
+
+def newest_messages(path: str, limit: int = MESSAGE_LIMIT) -> list[dict]:
+    """The newest messages at path, oldest first, decrypted."""
+    return [unseal(path, message) for message in get_store().newest(path, limit)]
 
 
 # ---- Storage (the real database, or an in-memory one in tests) ------------------------------
@@ -186,11 +231,12 @@ def edit_message(path: str, uid: str, text: str, now: int) -> dict:
     message = store.get(path)
     if not message:
         raise LookupError("Message")
+    message = unseal(path, message)
     if message.get("senderUid") != uid:
         raise PermissionError("You can only edit your own messages")
     if not text.strip() and not message.get("attachments") and not message.get("order"):
         raise ValueError("A message needs some text (or delete it instead)")
-    store.update(path, {"message": text.strip(), "editedAt": now})
+    store.update(path, seal(path, {"message": text.strip(), "editedAt": now}))
     return {**message, "message": text.strip(), "editedAt": now}
 
 
@@ -205,4 +251,4 @@ def delete_message(path: str, uid: str, business_id: str = "", by_business: str 
     if message.get("senderUid") != uid and not own_business:
         raise PermissionError("You can only delete your own messages")
     store.delete(path)
-    return message
+    return unseal(path, message)

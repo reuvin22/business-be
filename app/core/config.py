@@ -44,6 +44,12 @@ class Settings(BaseSettings):
     xendit_secret_key: str = ""
     xendit_webhook_token: str = ""
 
+    # Encrypts confidential data at rest (Firestore fields, the Redis cache, chat messages). 32 random bytes
+    # as base64; see app/core/crypto.py. Required. NEVER lose or change it: data encrypted with it cannot be
+    # read without it. Make one with:
+    #   python -c "import os, base64; print(base64.b64encode(os.urandom(32)).decode())"
+    data_encryption_key: str = ""
+
     @property
     def xendit_configured(self) -> bool:
         return bool(self.xendit_secret_key.strip())

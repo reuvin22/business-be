@@ -81,7 +81,11 @@ def open_conversation(db: Client, access: BusinessAccess, conversation_id: str) 
         conversation.last_read_at[access.business_id] = now
         conversation.unread = False
 
-    return ConversationWithMessages(conversation=conversation, messages=_read_messages(conversation))
+    return ConversationWithMessages(
+        conversation=conversation,
+        messages=_read_messages(conversation),
+        realtime_key=realtime.room_key(realtime.dm_path(conversation_id)),  # one of the two businesses: may read it
+    )
 
 
 def _open_with(db: Client, access: BusinessAccess, other_id: str) -> str:
@@ -133,16 +137,19 @@ def _send(db: Client, access: BusinessAccess, conversation_id: str, message_in: 
 
     # The message goes live first; then the conversation list is brought up to date
     store = realtime.get_store()
-    message.id = store.push(f"{realtime.dm_path(conversation_id)}/messages", _to_realtime(message))
+    messages_path = f"{realtime.dm_path(conversation_id)}/messages"
+    message.id = store.push(messages_path, realtime.seal(messages_path, _to_realtime(message)))
     store.set(f"{realtime.dm_path(conversation_id)}/meta/lastReadAt/{access.business_id}", now)
     conversations_collection(db).document(conversation_id).update(
-        {
-            "lastMessage": (message.message or "Sent a photo")[:200],
-            "lastMessageAt": now,
-            "lastSenderBusinessId": access.business_id,
-            f"lastReadAt.{access.business_id}": now,
-            "updatedAt": now,
-        }
+        Conversation.encrypt_fields(
+            {
+                "lastMessage": (message.message or "Sent a photo")[:200],
+                "lastMessageAt": now,
+                "lastSenderBusinessId": access.business_id,
+                f"lastReadAt.{access.business_id}": now,
+                "updatedAt": now,
+            }
+        )
     )
     _clear_cache(conversation)
 
@@ -177,10 +184,11 @@ def delete_message(db: Client, access: BusinessAccess, conversation_id: str, mes
 
 def _refresh_last_message(db: Client, conversation: Conversation) -> None:
     """The conversation list shows the newest message: after an edit or delete, it may be another one now."""
-    newest = realtime.get_store().newest(f"{realtime.dm_path(conversation.id)}/messages", 1)
+    newest = realtime.newest_messages(f"{realtime.dm_path(conversation.id)}/messages", 1)
     last = newest[0] if newest else {}
+    last_message = (last.get("message") or ("Sent a photo" if last else ""))[:200]
     conversations_collection(db).document(conversation.id).update(
-        {"lastMessage": (last.get("message") or ("Sent a photo" if last else ""))[:200], "updatedAt": current_time_ms()}
+        Conversation.encrypt_fields({"lastMessage": last_message, "updatedAt": current_time_ms()})
     )
     _clear_cache(conversation)
 
@@ -231,7 +239,7 @@ def _ensure_realtime(db: Client, conversation: Conversation) -> None:
             path,
             {
                 "meta": {"a": first, "b": second, "lastReadAt": read_times},
-                **{f"messages/{m.id}": _to_realtime(m) for m in earlier},
+                **{f"messages/{m.id}": realtime.seal(path, _to_realtime(m)) for m in earlier},
             },
         )
     _realtime_ready.add(conversation.id)
@@ -279,7 +287,7 @@ def _order_card(db: Client, conversation: Conversation, order_id: str) -> OrderC
 
 def _read_messages(conversation: Conversation) -> list[Message]:
     """The newest messages, oldest first. A message is read once the other side opened the chat after it."""
-    found = realtime.get_store().newest(f"{realtime.dm_path(conversation.id)}/messages", realtime.MESSAGE_LIMIT)
+    found = realtime.newest_messages(f"{realtime.dm_path(conversation.id)}/messages", realtime.MESSAGE_LIMIT)
     messages = []
     for item in found:
         created_at = item.get("createdAt", 0)

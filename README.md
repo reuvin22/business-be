@@ -226,6 +226,29 @@ Setup:
    and copy the **verification token**.
 3. Set `XENDIT_SECRET_KEY` and `XENDIT_WEBHOOK_TOKEN` in `.env` and on Render. Never put the secret key in a frontend.
 
+## Encryption of confidential data
+
+Confidential data is encrypted at rest with AES-256-GCM (`app/core/crypto.py`), using `DATA_ENCRYPTION_KEY`:
+
+- **Firestore**: each model lists its confidential fields in `encrypted_fields` (permit, tax, and license numbers and
+  legal documents; payment account numbers; contact emails and phones; credit terms and customer prices; order and
+  receipt lines, amounts, and addresses; online payments; messages; activity). They are encrypted in `to_firestore()`
+  and decrypted in `from_snapshot()`, so controllers work with plain values. Never encrypt a field a query filters or
+  sorts on.
+- **Redis**: every cache entry is encrypted.
+- **Realtime Database**: the text, photos, and order card of each message, and the title and detail of each activity.
+  Each room has its own key derived from the master key. The API hands it out only to users who may read the room
+  (`GET /chat` for the team, market, and live feed; opening a conversation for a DM), and the browser decrypts it
+  (`src/utils/crypto.ts`).
+
+The API answers with decrypted data over HTTPS, and the apps display it as usual. Passwords are never stored here:
+Firebase Authentication keeps only a salted scrypt hash of each password.
+
+Setup: generate the key (`python -c "import os, base64; print(base64.b64encode(os.urandom(32)).decode())"`) and set
+the **same** key in `.env` and on Render. Back it up somewhere safe: if it is lost, the encrypted data is lost too.
+Check it with `/api/health/encryption`. Data saved before encryption is still read. To encrypt it, run
+`python -m app.scripts.encrypt_existing` (dry run), then add `--apply`.
+
 ## Activity history and notifications
 
 Product changes (added, updated, deleted), messages received from other businesses, and connection events

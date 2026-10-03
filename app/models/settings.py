@@ -21,6 +21,18 @@ class PosSettings(PosSettingsIn, FirestoreModel):
 
 
 class LegalInfo(LegalIn, FirestoreModel):
+    # Encrypted in Firestore: registration, tax, permit, and license details (see app/core/crypto.py)
+    encrypted_fields = (
+        "registration_number",
+        "registration_date",
+        "tax_identification_number",
+        "business_permit_number",
+        "business_permit_expiry",
+        "license_number",
+        "license_expiry",
+        "legal_document_urls",
+    )
+
     verification_status: VerificationStatus = VerificationStatus.UNVERIFIED  # set by platform admins
 
 
@@ -29,7 +41,8 @@ class DeliverySettings(DeliverySettingsIn, FirestoreModel):
 
 
 class PaymentTerms(PaymentTermsIn, FirestoreModel):
-    pass
+    # Encrypted in Firestore: credit given to customers (see app/core/crypto.py)
+    encrypted_fields = ("credit_limit", "credit_days", "down_payment_percentage", "notes")
 
 
 class ReturnPolicy(ReturnPolicyIn, FirestoreModel):

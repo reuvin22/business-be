@@ -8,5 +8,7 @@ firebase-admin==7.7.0
 redis==6.4.0
 # Calls the Xendit API (online payments)
 httpx==0.28.1
+# Encrypts confidential data (AES-256-GCM)
+cryptography==50.0.2
 # Uploads images to Cloudflare R2 (R2 speaks the Amazon S3 API)
 boto3==1.43.103

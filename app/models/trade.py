@@ -37,6 +37,19 @@ class OrderItem(CamelModel):
 
 
 class Order(FirestoreModel):
+    # Encrypted in Firestore: what was bought, for how much, and where it goes (see app/core/crypto.py)
+    encrypted_fields = (
+        "items",
+        "subtotal",
+        "delivery_fee",
+        "tax",
+        "discount",
+        "total",
+        "shipping_address",
+        "notes",
+        "status_reason",
+    )
+
     order_number: str
     buyer_business_id: str
     buyer_business_name: str
@@ -85,6 +98,9 @@ def orders_collection(db: Client) -> CollectionReference:
 
 
 class Sale(SaleIn, FirestoreModel):
+    # Encrypted in Firestore: prices (see app/core/crypto.py)
+    encrypted_fields = ("unit_price", "unit_cost")
+
     product_name: str = ""
     variant_name: str = ""
     unit_cost: float | None = None  # the product's cost price at the time of the sale

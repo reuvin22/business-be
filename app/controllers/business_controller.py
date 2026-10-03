@@ -65,7 +65,7 @@ def update_business(db: Client, access: BusinessAccess, business_in: BusinessIn)
     now = current_time_ms()
 
     # update() only changes the form fields; system fields like ratings are left alone.
-    changes = business_in.model_dump(mode="json", by_alias=True)
+    changes = Business.encrypt_fields(business_in.model_dump(mode="json", by_alias=True))
     changes["updatedAt"] = now
     business_document(db, access.business_id).update(changes)
     # Each member's "My businesses" list (and each seller's list in the selling app) holds a copy of the

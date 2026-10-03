@@ -26,6 +26,7 @@ class ConversationView(Conversation):
 class ConversationWithMessages(CamelModel):
     conversation: ConversationView
     messages: list[Message]
+    realtime_key: str = ""  # decrypts the live messages (chat/dm/{id}); only the two businesses get it
 
 
 class BusinessContext(CamelModel):

@@ -175,6 +175,7 @@ class ActivityCategory(StrEnum):
 class MediaType(StrEnum):
     IMAGE = "IMAGE"
     VIDEO = "VIDEO"
+    DOCUMENT = "DOCUMENT"  # a PDF (e.g. the full return policy)
 
 
 class ProductStatus(StrEnum):

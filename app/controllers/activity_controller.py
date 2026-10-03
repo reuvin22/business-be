@@ -56,9 +56,10 @@ def record(
             created_at=now,
             updated_at=now,
         )
-        data = activity.to_firestore()
-        ref.set(data)
-        realtime.get_store().set(f"{realtime.live_path(business_id)}/{ref.id}", data)
+        ref.set(activity.to_firestore())
+        # The live copy is encrypted with the feed's key, which the business's members get (see chat access)
+        live = f"{realtime.live_path(business_id)}/{ref.id}"
+        realtime.get_store().set(live, realtime.seal(live, activity.model_dump(mode="json", by_alias=True, exclude={"id"})))
     except Exception:
         logger.exception("Could not record activity %s for business %s", action, business_id)
 

@@ -18,6 +18,9 @@ from app.schemas.trust import CertificationIn, DocumentIn, SocialLinkIn
 
 
 class Contact(ContactIn, FirestoreModel):
+    # Encrypted in Firestore: personal contact details (see app/core/crypto.py)
+    encrypted_fields = ("email", "phone")
+
     is_verified: bool = False  # True when the contact is linked to an active team member
 
 
@@ -34,10 +37,14 @@ class DeliveryZone(DeliveryZoneIn, FirestoreModel):
 
 
 class PaymentMethod(PaymentMethodIn, FirestoreModel):
-    pass
+    # Encrypted in Firestore: where buyers send money (see app/core/crypto.py)
+    encrypted_fields = ("account_name", "account_number", "instructions")
 
 
 class Certification(CertificationIn, FirestoreModel):
+    # Encrypted in Firestore: the certificate itself (see app/core/crypto.py)
+    encrypted_fields = ("certificate_number", "document_url")
+
     verification_status: VerificationStatus = VerificationStatus.UNVERIFIED  # set by platform admins
 
 
@@ -46,6 +53,9 @@ class SocialLink(SocialLinkIn, FirestoreModel):
 
 
 class BusinessDocument(DocumentIn, FirestoreModel):
+    # Encrypted in Firestore: permits, IDs, contracts (see app/core/crypto.py)
+    encrypted_fields = ("file_url", "file_name", "issue_date", "expiry_date")
+
     verification_status: VerificationStatus = VerificationStatus.UNVERIFIED  # set by platform admins
     verified_at: int | None = None
     # "uploaded at" is created_at

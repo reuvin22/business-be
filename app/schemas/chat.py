@@ -40,6 +40,10 @@ class ChatAccess(CamelModel):
     business_id: str
     team_path: str  # this business's team channel
     market_path: str  # the public market channel
+    # What is said is encrypted (see app/core/realtime.py): the keys to decrypt each room with (base64, AES-GCM)
+    team_key: str
+    market_key: str
+    live_key: str  # the live activity feed (notifications)
 
 
 class MessageEditIn(CamelModel):

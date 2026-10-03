@@ -11,6 +11,9 @@ from app.schemas.enums import VerificationStatus, VerificationType
 
 
 class Business(BusinessIn, FirestoreModel):
+    # Encrypted in Firestore: contact details (see app/core/crypto.py)
+    encrypted_fields = ("primary_email", "primary_phone")
+
     # ---- Set by the system, not by the form ----
     owner_uid: str = ""
     # User ids of the ACTIVE members. Lets us find "my businesses" with one query.

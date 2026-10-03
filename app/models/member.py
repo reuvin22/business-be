@@ -11,6 +11,9 @@ from app.schemas.enums import MemberRole, MemberStatus, Permission
 class Member(FirestoreModel):
     """A user who belongs to a business (section 25). A user can be a member of several businesses."""
 
+    # Encrypted in Firestore: personal contact details (see app/core/crypto.py)
+    encrypted_fields = ("email",)
+
     email: str = ""
     display_name: str = ""
     role: MemberRole

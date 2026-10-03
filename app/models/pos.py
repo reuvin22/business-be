@@ -25,6 +25,19 @@ class ReceiptLine(CamelModel):
 
 
 class Receipt(FirestoreModel):
+    # Encrypted in Firestore: what was sold, for how much, and to whom (see app/core/crypto.py)
+    encrypted_fields = (
+        "items",
+        "total",
+        "amount_paid",
+        "change_given",
+        "note",
+        "payment_reference",
+        "customer_name",
+        "table_number",
+        "void_reason",
+    )
+
     receipt_number: str  # short and readable, e.g. 20260928-K3F9QX
     date: str  # YYYY-MM-DD, the seller's local date
     location_id: str
@@ -58,6 +71,9 @@ def receipts_collection(db: Client, business_id: str) -> CollectionReference:
 
 
 class OnlinePayment(FirestoreModel):
+    # Encrypted in Firestore: the cart and the payment (see app/core/crypto.py)
+    encrypted_fields = ("checkout", "total", "payment_link_url", "payment_reference", "error")
+
     checkout: CheckoutIn  # the cart, saved as it was when the seller pressed Charge
     payment_method: PosPaymentType
     total: float

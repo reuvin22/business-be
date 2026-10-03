@@ -30,6 +30,8 @@ ALLOWED_VIDEO_TYPES = {
     "video/quicktime": "mov",
 }
 ALLOWED_TYPES = ALLOWED_IMAGE_TYPES | ALLOWED_VIDEO_TYPES
+ALLOWED_DOCUMENT_TYPES = {"application/pdf": "pdf"}
+EXTENSIONS = ALLOWED_TYPES | ALLOWED_DOCUMENT_TYPES
 MAX_FILE_BYTES = 25 * 1024 * 1024  # 25 MB, for each file (image or video)
 
 _client = None
@@ -134,13 +136,14 @@ def upload_file(data: bytes, content_type: str, folder: str) -> str:
 
     folder: where it goes inside the bucket, e.g. "product_img/abc123".
     """
-    key = f"{folder}/{uuid.uuid4().hex}.{ALLOWED_TYPES[content_type]}"
+    key = f"{folder}/{uuid.uuid4().hex}.{EXTENSIONS[content_type]}"
     try:
         _get_client().put_object(
             Bucket=_bucket(),
             Key=key,
             Body=data,
             ContentType=content_type,
+            ContentDisposition="inline",  # shown in the browser (a PDF opens in the viewer, not as a download)
             CacheControl="public, max-age=31536000, immutable",  # the name is unique, so it never changes
         )
     except ClientError as error:

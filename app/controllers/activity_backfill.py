@@ -216,11 +216,12 @@ def _messages(db: Client, business_id: str) -> list[Activity]:
         other = conversation.business_names.get(other_id, "another business")
 
         # (id, text, sender, when) of each message the other business sent
-        live = realtime.get_store().get(f"{realtime.dm_path(conversation.id)}/messages") or {}
+        messages_path = f"{realtime.dm_path(conversation.id)}/messages"
+        live = realtime.get_store().get(messages_path) or {}
         if live:
             received = [
                 (key, m.get("message", ""), m.get("senderName", ""), m.get("createdAt", 0))
-                for key, m in live.items()
+                for key, m in ((key, realtime.unseal(messages_path, m)) for key, m in live.items())
                 if m.get("senderBusinessId") == other_id
             ]
         else:  # a chat from before the Realtime Database: still in Firestore

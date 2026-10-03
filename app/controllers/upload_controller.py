@@ -11,6 +11,8 @@ from app.schemas.enums import MediaType, Permission
 
 def detect_file_type(data: bytes) -> str | None:
     """The real type of an image or video, from its first bytes (we don't trust the name or the browser)."""
+    if data.startswith(b"%PDF-"):
+        return "application/pdf"
     if data.startswith(b"\xff\xd8\xff"):
         return "image/jpeg"
     if data.startswith(b"\x89PNG\r\n\x1a\n"):
@@ -33,6 +35,7 @@ UPLOAD_KINDS = {
     "product": ("product_img", Permission.MANAGE_PRODUCTS, storage.ALLOWED_TYPES),
     "business": ("business_img", Permission.EDIT_BUSINESS, storage.ALLOWED_IMAGE_TYPES),
     "chat": ("chat_img", None, storage.ALLOWED_IMAGE_TYPES),
+    "policy": ("policy_docs", Permission.EDIT_BUSINESS, storage.ALLOWED_DOCUMENT_TYPES),  # e.g. the return policy PDF
 }
 
 
@@ -41,7 +44,7 @@ def upload_business_file(access: BusinessAccess, file: UploadFile, kind: str = "
 
     kind: "product" (product photos and videos), "business" (logo, cover), or "chat" (photos sent in messages)."""
     if kind not in UPLOAD_KINDS:
-        raise bad_request("kind must be 'product', 'business', or 'chat'")
+        raise bad_request("kind must be 'product', 'business', 'chat', or 'policy'")
     folder, permission, allowed = UPLOAD_KINDS[kind]
     if permission is not None and not access.can(permission):
         raise forbidden(f"You need the '{permission.value}' permission to upload this file")
@@ -57,10 +60,18 @@ def upload_business_file(access: BusinessAccess, file: UploadFile, kind: str = "
         raise bad_request("The file is too big (25 MB at most)")
     content_type = detect_file_type(data)
     if content_type not in allowed:
+        if allowed is storage.ALLOWED_DOCUMENT_TYPES:
+            raise bad_request("Please choose a PDF file")
         if allowed is storage.ALLOWED_IMAGE_TYPES:
             raise bad_request("Please choose a JPG, PNG, WEBP, or GIF image")
         raise bad_request("Please choose a JPG, PNG, WEBP, or GIF image, or an MP4, WEBM, or MOV video")
 
     url = storage.upload_file(data, content_type, folder=f"{folder}/{access.business_id}")
-    media_type = MediaType.VIDEO if content_type in storage.ALLOWED_VIDEO_TYPES else MediaType.IMAGE
+    media_type = (
+        MediaType.VIDEO
+        if content_type in storage.ALLOWED_VIDEO_TYPES
+        else MediaType.DOCUMENT
+        if content_type in storage.ALLOWED_DOCUMENT_TYPES
+        else MediaType.IMAGE
+    )
     return url, media_type

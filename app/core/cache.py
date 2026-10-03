@@ -38,6 +38,7 @@ from pydantic import BaseModel
 from redis.backoff import NoBackoff
 from redis.retry import Retry
 
+from app.core import crypto
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -50,6 +51,7 @@ GEO = "geo"  # place names (countries, regions, cities): the same for everyone, 
 
 # When Redis stops answering, skip it for this long and use Firestore directly
 OFFLINE_PAUSE_SECONDS = 30
+CACHE_PURPOSE = "cache"  # the key that encrypts cache entries (see app/core/crypto.py)
 
 T = TypeVar("T")
 M = TypeVar("M", bound=BaseModel)
@@ -209,7 +211,9 @@ def remember(
         cache_key = f"{KEY_PREFIX}:e{epoch or 0}:{scope}:v{version or 0}:{key}"
         cached = client.get(cache_key)
         if cached is not None:
-            return from_json(json.loads(cached))
+            # Entries are encrypted: the cache holds decrypted data, e.g. order totals and messages
+            text = cached.decode() if isinstance(cached, bytes) else cached
+            return from_json(json.loads(crypto.decrypt_text(text, CACHE_PURPOSE)))
     except redis.RedisError as error:
         _pause(error)
         return load()
@@ -218,7 +222,8 @@ def remember(
 
     value = load()
     try:
-        client.set(cache_key, json.dumps(to_json(value)), ex=ttl_seconds or settings.cache_ttl_seconds)
+        entry = crypto.encrypt_text(json.dumps(to_json(value)), CACHE_PURPOSE)
+        client.set(cache_key, entry, ex=ttl_seconds or settings.cache_ttl_seconds)
     except redis.RedisError as error:
         _pause(error)
     return value

@@ -13,6 +13,9 @@ from app.schemas.enums import ActivityCategory
 
 
 class Activity(FirestoreModel):
+    # Encrypted in Firestore: what happened (may quote a message) (see app/core/crypto.py)
+    encrypted_fields = ("title", "detail")
+
     category: ActivityCategory  # what the filters group by
     action: str  # e.g. "product.created", "connection.accepted", "message.received"
     title: str  # what happened, from this business's point of view

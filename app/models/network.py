@@ -21,6 +21,9 @@ from app.schemas.network import CustomerPriceIn, OrderCard, Ratings
 class Relationship(FirestoreModel):
     """Reads as: related_business is business's relationship_type. Example: Acme is Sunrise's SUPPLIER."""
 
+    # Encrypted in Firestore: private notes (see app/core/crypto.py)
+    encrypted_fields = ("notes",)
+
     business_id: str  # the business that asked
     business_name: str
     related_business_id: str  # the business that was asked
@@ -43,6 +46,9 @@ def relationships_collection(db: Client) -> CollectionReference:
 
 
 class CustomerPrice(CustomerPriceIn, FirestoreModel):
+    # Encrypted in Firestore: private prices (see app/core/crypto.py)
+    encrypted_fields = ("price", "minimum_quantity")
+
     customer_business_name: str = ""
 
 
@@ -78,6 +84,9 @@ def reviews_collection(db: Client, business_id: str) -> CollectionReference:
 
 
 class Conversation(FirestoreModel):
+    # Encrypted in Firestore: the newest message (see app/core/crypto.py)
+    encrypted_fields = ("last_message",)
+
     business_ids: list[str]  # the two businesses talking
     business_names: dict[str, str]  # {businessId: name}
     status: ConversationStatus = ConversationStatus.OPEN
@@ -88,6 +97,9 @@ class Conversation(FirestoreModel):
 
 
 class Message(FirestoreModel):
+    # Encrypted in Firestore: what was said (see app/core/crypto.py)
+    encrypted_fields = ("message", "attachments", "order")
+
     sender_uid: str
     sender_name: str
     sender_business_id: str
@@ -111,6 +123,9 @@ def messages_collection(db: Client, conversation_id: str) -> CollectionReference
 
 
 class VerificationRequest(FirestoreModel):
+    # Encrypted in Firestore: the review (see app/core/crypto.py)
+    encrypted_fields = ("notes", "rejection_reason")
+
     business_id: str
     business_name: str
     verification_type: VerificationType

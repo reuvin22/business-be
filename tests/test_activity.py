@@ -6,6 +6,8 @@ from types import SimpleNamespace
 import pytest
 
 from app.controllers import activity_controller, relationship_controller
+from app.core import crypto, realtime
+from app.models.activity import Activity
 from app.models.network import Relationship
 from app.schemas.enums import ActivityCategory, RelationshipType
 from tests.conftest import create_business, login_as
@@ -51,14 +53,18 @@ def test_an_entry_is_saved_and_pushed_live(histories, fake_realtime):
     activity_controller.record(
         None, "b1", ActivityCategory.PRODUCTS, "product.created", "Product added: Rice", by=access_for(), link="/products/p1"
     )
-    saved = histories["b1"].saved[0]
+    saved = Activity.decrypt_fields(histories["b1"].saved[0])
+    assert crypto.is_encrypted(histories["b1"].saved[0]["title"])  # what happened is encrypted in Firestore
     assert (saved["category"], saved["title"], saved["actorUid"], saved["actorName"]) == (
         "PRODUCTS",
         "Product added: Rice",
         "u1",
         "Ana",
     )
-    assert fake_realtime.newest("live/b1/activity", 10)[0]["action"] == "product.created"
+    live = fake_realtime.newest("live/b1/activity", 10)[0]
+    assert live["action"] == "product.created"
+    assert crypto.is_encrypted(live["title"])  # ...and live, with the feed's key
+    assert realtime.unseal("live/b1/activity", live)["title"] == "Product added: Rice"
 
 
 def test_another_business_is_named_instead_of_the_person(histories, fake_realtime):
@@ -81,8 +87,8 @@ def test_a_connection_change_is_told_to_both_sides(histories, fake_realtime):
     relationship_controller._record(
         None, access_for(), relationship, "withdrawn", mine="You withdrew", theirs="Acme withdrew their request"
     )
-    assert histories["b1"].saved[0]["title"] == "You withdrew"
-    assert histories["b2"].saved[0]["title"] == "Acme withdrew their request"
+    assert Activity.decrypt_fields(histories["b1"].saved[0])["title"] == "You withdrew"
+    assert Activity.decrypt_fields(histories["b2"].saved[0])["title"] == "Acme withdrew their request"
     assert fake_realtime.newest("live/b2/activity", 10)[0]["action"] == "connection.withdrawn"
 
 

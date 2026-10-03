@@ -1,6 +1,6 @@
 from pydantic import Field
 
-from app.schemas.base import CamelModel
+from app.schemas.base import CamelModel, UrlText
 from app.schemas.enums import RefundMethod
 
 
@@ -13,7 +13,8 @@ class ReturnPolicyIn(CamelModel):
     replacement_available: bool = False
     damaged_goods_policy: str = ""
     defective_goods_policy: str = ""
-    policy_description: str = ""
+    policy_description: str = ""  # the full policy, typed in
+    policy_file_url: UrlText = ""  # ...and/or as a PDF (uploaded with kind=policy); buyers read it inside the app
 
 
 class SupplierProfileIn(CamelModel):

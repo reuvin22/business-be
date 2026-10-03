@@ -5,7 +5,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.core import cache, storage
+from app.core import cache, crypto, storage
 from app.core.config import settings
 from app.core.firebase import get_firebase_app
 from app.routes import (
@@ -31,6 +31,11 @@ from app.routes import (
 API_V1_PREFIX = "/api/v1"
 
 app = FastAPI(title=settings.app_name, version="1.0.0")
+
+# Confidential data is encrypted with DATA_ENCRYPTION_KEY (see app/core/crypto.py). Without it, anything that
+# reads or saves encrypted data fails (nothing is ever saved unencrypted), so say so loudly at startup.
+if crypto.check()["status"] != "ok":
+    logging.getLogger(__name__).error("Encryption is not set up: %s", crypto.check().get("detail"))
 logger = logging.getLogger(__name__)
 
 
@@ -102,6 +107,13 @@ def firebase_check():
     except Exception as error:  # report any setup problem instead of a bare 500
         return JSONResponse(status_code=503, content={"status": "error", "detail": str(error)})
     return {"status": "ok"}
+
+
+@app.get("/api/health/encryption", tags=["Health"])
+def encryption_check():
+    """Open this in a browser after deploying: is DATA_ENCRYPTION_KEY set and working? It never shows the key."""
+    result = crypto.check()
+    return JSONResponse(status_code=200 if result["status"] == "ok" else 503, content=result)
 
 
 @app.get("/api/health/r2", tags=["Health"])

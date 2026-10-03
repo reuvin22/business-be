@@ -7,7 +7,8 @@ from fastapi.testclient import TestClient
 from google.cloud import firestore
 
 from app.controllers import conversation_controller
-from app.core import cache, realtime
+from app.core import cache, crypto, realtime
+from app.core.config import settings
 from app.core.firebase import get_db
 from app.dependencies.auth import get_current_user
 from app.main import app
@@ -17,6 +18,11 @@ from app.schemas.user import CurrentUser
 # which is found through this environment variable, e.g. FIRESTORE_EMULATOR_HOST=127.0.0.1:8080
 EMULATOR_HOST = os.environ.get("FIRESTORE_EMULATOR_HOST")
 TEST_PROJECT = "demo-my-business"
+
+# A fixed test key (never the real one): confidential fields are encrypted in tests too
+settings.data_encryption_key = "dGVzdC1rZXktdGVzdC1rZXktdGVzdC1rZXktdGVzdCE="
+crypto.master_key.cache_clear()
+crypto._derive.cache_clear()
 
 @pytest.fixture(autouse=True)
 def fake_redis():

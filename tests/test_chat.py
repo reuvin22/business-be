@@ -6,7 +6,7 @@ import pytest
 from fastapi import HTTPException
 
 from app.controllers import chat_controller
-from app.core import realtime
+from app.core import crypto, realtime
 from app.schemas.chat import ChatMessageIn
 from app.schemas.enums import MemberRole, Permission
 from tests.conftest import create_business, login_as
@@ -30,6 +30,7 @@ def test_asking_for_access_lets_the_member_read_the_chats(fake_realtime):
     access = chat_controller.get_access(member())
     assert (access.team_path, access.market_path) == ("chat/team/b1/messages", "chat/market/messages")
     assert fake_realtime.get("chatAccess/u1/b1") is True
+    assert access.team_key == realtime.room_key("chat/team/b1/messages")  # to decrypt the messages
 
     realtime.revoke_access("u1", "b1")
     assert fake_realtime.get("chatAccess/u1/b1") is None
@@ -38,7 +39,8 @@ def test_asking_for_access_lets_the_member_read_the_chats(fake_realtime):
 def test_team_and_market_messages(fake_realtime):
     sent = chat_controller.send_team_message(member(), ChatMessageIn(message="Stock count at 5pm"))
     assert sent.id and sent.sender_name == "Ana"
-    assert [m["message"] for m in fake_realtime.newest("chat/team/b1/messages", 50)] == ["Stock count at 5pm"]
+    assert [m["message"] for m in realtime.newest_messages("chat/team/b1/messages", 50)] == ["Stock count at 5pm"]
+    assert crypto.is_encrypted(fake_realtime.newest("chat/team/b1/messages", 50)[0]["message"])  # encrypted in the database
 
     post = chat_controller.send_market_message(member(), ChatMessageIn(message="Rice 25kg, 10% off this week"))
     market = fake_realtime.newest("chat/market/messages", 50)
@@ -46,7 +48,7 @@ def test_team_and_market_messages(fake_realtime):
 
     # Another business cannot take it down; the business that posted it can
     with pytest.raises(HTTPException) as refused:
-        chat_controller.delete_market_message(member(business_id="b2"), post.id)
+        chat_controller.delete_market_message(member(business_id="b2", uid="u2"), post.id)
     assert refused.value.status_code == 403
     chat_controller.delete_market_message(member(), post.id)
     assert fake_realtime.newest("chat/market/messages", 50) == []

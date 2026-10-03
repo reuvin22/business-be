@@ -124,6 +124,7 @@ def test_r2_request_is_built_correctly(monkeypatch):
                 "Key": ANY,
                 "Body": PNG,
                 "ContentType": "image/png",
+                "ContentDisposition": "inline",
                 "CacheControl": "public, max-age=31536000, immutable",
             },
         )

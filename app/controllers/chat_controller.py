@@ -21,6 +21,10 @@ def get_access(access: BusinessAccess) -> ChatAccess:
         business_id=access.business_id,
         team_path=realtime.team_path(access.business_id),
         market_path=realtime.MARKET_PATH,
+        # The keys to decrypt them with (this member may read all three)
+        team_key=realtime.room_key(realtime.team_path(access.business_id)),
+        market_key=realtime.room_key(realtime.MARKET_PATH),
+        live_key=realtime.room_key(realtime.live_path(access.business_id)),
     )
 
 
@@ -83,5 +87,5 @@ def _post(access: BusinessAccess, path: str, message_in: ChatMessageIn) -> ChatM
         created_at=current_time_ms(),
     )
     data = message.model_dump(mode="json", by_alias=True, exclude={"id"})
-    message.id = realtime.get_store().push(path, data)
+    message.id = realtime.get_store().push(path, realtime.seal(path, data))
     return message
