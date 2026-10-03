@@ -210,6 +210,22 @@ def start_scanner_session(
     return scanner_controller.start_session(db, access, session_in.location_id, session_in.till_device_id)
 
 
+@router.post("/businesses/{business_id}/admin-scanner-sessions", response_model=ScannerSessionStarted, status_code=status.HTTP_201_CREATED)
+def start_admin_scanner_session(
+    session_in: ScannerSessionStartIn, db: Client = Depends(get_db), access: BusinessAccess = Depends(get_business_access)
+):
+    """The web app connects a phone to REGISTER products (needs the products.manage permission). Its own QR code;
+    the phone opens straight to Register product."""
+    return scanner_controller.start_session(db, access, session_in.location_id, session_in.till_device_id, mode="admin")
+
+
+@router.delete("/businesses/{business_id}/admin-scanner-sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
+def end_admin_scanner_session(
+    session_id: str, till_device_id: str, db: Client = Depends(get_db), access: BusinessAccess = Depends(get_business_access)
+):
+    scanner_controller.end_session(db, access, session_id, till_device_id)
+
+
 @router.delete("/businesses/{business_id}/pos/scanner-sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
 def end_scanner_session(
     session_id: str, till_device_id: str, db: Client = Depends(get_db), access: BusinessAccess = Depends(get_pos_access)

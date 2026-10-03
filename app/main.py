@@ -104,7 +104,7 @@ READ_ONLY_POSTS = ("/orders/quote",)  # POSTs that don't change anything
 STOCK_ONLY_URL = re.compile(r"^/api/v1/businesses/[^/]+/(inventory|sales|pos)(/|$)")
 # Messages: their controllers clear exactly the chat caches they change, so nothing else is made outdated.
 # Phone scans only put products in a till's cart: nothing cached changes.
-CHAT_URL = re.compile(r"^/api/v1/businesses/[^/]+/(chat|conversations|pos/scanner-sessions)(/|$)")
+CHAT_URL = re.compile(r"^/api/v1/businesses/[^/]+/(chat|conversations|pos/scanner-sessions|admin-scanner-sessions)(/|$)")
 
 
 @app.middleware("http")

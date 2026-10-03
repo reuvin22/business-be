@@ -89,9 +89,13 @@ def _end(db: Client, business_id: str, session_id: str) -> None:
 # ---- The till (signed in to the selling app) -------------------------------------------------------
 
 
-def start_session(db: Client, access: BusinessAccess, location_id: str, till_device_id: str) -> ScannerSessionStarted:
-    """A new session (and QR code) for THIS till. Ends this till's earlier sessions, never another till's."""
-    access.require(Permission.USE_POS)
+def start_session(
+    db: Client, access: BusinessAccess, location_id: str, till_device_id: str, mode: str = "till"
+) -> ScannerSessionStarted:
+    """A new session (and QR code) for THIS till (or web app browser). Ends its earlier sessions, never another's.
+
+    mode "admin" (from the web app): the phone only registers products, so only people who manage products start one."""
+    access.require(Permission.MANAGE_PRODUCTS if mode == "admin" else Permission.USE_POS)
     location = get_location(db, access, location_id)  # the same check as selling: a seller only at their store
     this_till = FieldFilter("tillDeviceId", "==", till_device_id)
     for snapshot in scanner_sessions_collection(db, access.business_id).where(filter=this_till).stream():
@@ -102,6 +106,7 @@ def start_session(db: Client, access: BusinessAccess, location_id: str, till_dev
     ref = scanner_sessions_collection(db, access.business_id).document()  # a random id: unique per session
     session = ScannerSession(
         id=ref.id,
+        mode=mode,
         location_id=location.id,
         location_name=location.location_name,
         till_device_id=till_device_id,
@@ -269,6 +274,8 @@ def add_scan(db: Client, business_id: str, session_id: str, token: str, scan_in:
     if abs((today - datetime.datetime.now(datetime.UTC).date()).days) > 1:
         raise bad_request("Check the date on this phone")
     business, session = phone_session(db, business_id, session_id, token)
+    if session.mode == "admin":
+        raise bad_request("This phone is connected to the web app to register products, not to a till")
     barcode = scan_in.barcode.strip()
     found = _find_item(catalog_for(db, business, today), barcode)
     if found is None:

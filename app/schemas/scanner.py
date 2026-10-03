@@ -1,5 +1,7 @@
 """The phone scanner app (business-scanner) and the till it is paired with. See app/models/scanner.py."""
 
+from typing import Literal
+
 from pydantic import Field
 
 from app.models.scanner import ScannerSession
@@ -7,7 +9,7 @@ from app.schemas.base import CamelModel
 
 
 class ScannerSessionStartIn(CamelModel):
-    location_id: str = Field(min_length=1)  # the store the till sells at
+    location_id: str = Field(min_length=1)  # the store the till sells at (admin: where new products' stock goes)
     # A random id this till's browser keeps: each till has its own sessions (two tills never share one)
     till_device_id: str = Field(min_length=16, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
 
@@ -23,6 +25,7 @@ class ScannerSessionStarted(CamelModel):
 
 class ScannerSessionView(CamelModel):
     id: str
+    mode: Literal["till", "admin"] = "till"  # admin: the phone only registers products
     location_id: str
     location_name: str
     till_name: str

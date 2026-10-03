@@ -18,6 +18,9 @@ from app.models.business import business_subcollection
 
 
 class ScannerSession(FirestoreModel):
+    # "till": scans go into a selling-app till's cart. "admin": started from the web app by someone who manages
+    # products; the phone only registers products (there is no cart to scan into).
+    mode: str = "till"
     location_id: str
     location_name: str = ""
     till_device_id: str  # the till (one browser) that started it: each till has its own sessions

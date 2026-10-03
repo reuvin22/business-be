@@ -134,3 +134,21 @@ def test_registering_a_product_from_the_phone(client, firestore_db):
     # It sells at the till right away: the scan finds it
     assert client.post(f"{phone}/scans", json={"barcode": "4809999"}, headers=headers).status_code == 201
     assert client.post(f"{phone}/products", json=body).status_code == 401  # no token, no product
+
+
+def test_a_phone_connected_from_the_web_app_only_registers_products(client, firestore_db):
+    business_id = create_business(client)["id"]
+    product_id, location_id = create_product_with_stock(client, business_id)
+    client.put(f"/api/v1/businesses/{business_id}/products/{product_id}", json={"productName": "Cola 1.5L", "barcode": "4800001"})
+    started = client.post(
+        f"/api/v1/businesses/{business_id}/admin-scanner-sessions", json={"locationId": location_id, "tillDeviceId": TILL_A}
+    )
+    assert started.status_code == 201, started.text
+    paired = pair(client, started.json()["pairingCode"]).json()
+    assert paired["session"]["mode"] == "admin" and paired["actions"] == ["register_product"]
+
+    phone = f"/api/v1/pos/scanner/{business_id}/{started.json()['session']['id']}"
+    headers = {"X-Scanner-Token": paired["token"]}
+    assert client.post(f"{phone}/scans", json={"barcode": "4800001"}, headers=headers).status_code == 400  # no till cart
+    body = {"productName": "Bread", "barcode": "4809999", "price": 45}
+    assert client.post(f"{phone}/products", json=body, headers=headers).status_code == 201
